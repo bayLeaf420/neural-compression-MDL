@@ -101,17 +101,17 @@ def validation_step(
 def build_model(key: jax.Array) -> BayesianVAE:
     encoder_config = EncoderConfig(
         ConvConfig(
-            kernels=((3, 3), (3, 3), (3, 3)),
-            strides=((1, 1), (1, 1), (1, 1)),
-            channels=(7, 7, 7),
+            kernels=((5, 5), (4, 4), (3, 3), (3, 3), (3, 3)),
+            strides=((1, 1), (2, 2), (2, 2), (2, 2), (2, 2)),
+            channels=(7, 8, 9, 10, 11),
         ),
         LinConfig(
-            hidden_dims=(638, 394, 197, 98),
+            hidden_dims=(224, 100, 88, 50),
         ),
     )
     decoder_config = DecoderConfig(
         LinConfig(
-            hidden_dims=(98, 148, 247, 345, 492, 784),
+            hidden_dims=(55, 124, 345, 492, 784),
         )
     )
     vae_config = VaeConfig(

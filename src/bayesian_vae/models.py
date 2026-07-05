@@ -135,14 +135,14 @@ class BayesianEncoder(nnx.Module):
         hidden = x
         for conv_layer in self.conv_layers:
             key_batch = jax.random.split(layer_keys[k_i], batch_size)
-            hidden = jnp.square(jax.nn.relu(conv_layer(hidden, key_batch)))
+            hidden = jax.nn.relu(conv_layer(hidden, key_batch))
             k_i += 1
 
         hidden = hidden.reshape((batch_size, -1))  # Flatten (H, W, C) -> (H*W*C,)
 
         for lin_layer in self.lin_layers:
             key_batch = jax.random.split(layer_keys[k_i], batch_size)
-            hidden = jnp.square(jax.nn.relu(lin_layer(hidden, key_batch)))
+            hidden = jax.nn.relu(lin_layer(hidden, key_batch))
             k_i += 1
 
         mean_keys = jax.random.split(layer_keys[k_i], batch_size)
@@ -235,7 +235,7 @@ class BayesianDecoder(nnx.Module):
         hidden = z
         for lin_layer in self.lin_layers:
             key_batch = jax.random.split(layer_keys[k_i], batch_size)
-            hidden = jnp.square(jax.nn.relu(lin_layer(hidden, key_batch)))
+            hidden = jax.nn.relu(lin_layer(hidden, key_batch))
             k_i += 1
 
         key_batch = jax.random.split(layer_keys[k_i], batch_size)
