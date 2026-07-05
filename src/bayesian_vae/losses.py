@@ -13,25 +13,20 @@ class LossAux:
     weight_kl_divergence: jax.Array
 
 
-def gaussian_reconstruction_loss(
-    mean: jax.Array,
-    lnvar: jax.Array,
-    target: jax.Array,
-) -> jax.Array:
-    """
-    Computes the per-pixel negative log-likelihood for a Gaussian distribution.
-
-    Args:
-      mean: [batch_size, height, width, channels]
-      lnvar: [batch_size, height, width, channels]
-      target: [batch_size, height, width, channels]
-
-    Returns:
-        Average NLL over the batch and all pixels.
-    """
-    nll_per_pixel = 0.5 * lnvar + 0.5 * jnp.exp(-lnvar) * (target - mean) ** 2
-    # Sum over spatial dimensions then avg over batch
-    return jnp.mean(jnp.sum(nll_per_pixel, axis=(1, 2, 3)))
+def erf_reconstruction_loss(mean, lnvar, target, num_bins=256):
+    lnvar = jnp.clip(lnvar, -12.0, 12.0)
+    std = jnp.exp(0.5 * lnvar)
+    half_bin = 0.5 / (num_bins - 1)      # half the bin width, on [0,1] scale
+    # standardized upper/lower bin edges
+    upper = (target + half_bin - mean) / std
+    lower = (target - half_bin - mean) / std
+    # normal CDF via erf
+    def cdf(z):
+        return 0.5 * (1.0 + jax.lax.erf(z / jnp.sqrt(2.0)))
+    prob = cdf(upper) - cdf(lower)                 # probability mass in the bin
+    prob = jnp.clip(prob, 1e-12, 1.0)              # avoid log(0)
+    nll = -jnp.log(prob)                           # non-negative, in NATS
+    return jnp.mean(jnp.sum(nll, axis=(1, 2, 3)))
 
 
 def compute_training_loss(
@@ -50,7 +45,7 @@ def compute_training_loss(
     """
     x_hat_mu, x_hat_lnvar, z_mu, z_lnvar, _ = model(x, key)
     batch_size = x.shape[0]
-    reconstruction_loss = gaussian_reconstruction_loss(x_hat_mu, x_hat_lnvar, x)
+    reconstruction_loss = erf_reconstruction_loss(x_hat_mu, x_hat_lnvar, x)
     latent_kl_loss = (
         jnp.sum(model.calculate_latent_kl_divergence(z_mu, z_lnvar)) / batch_size
     )
@@ -75,4 +70,4 @@ def compute_validation_reconstruction_loss(
     key: jax.Array,
 ) -> jax.Array:
     x_hat_mu, x_hat_lnvar, *_ = model(x, key)
-    return gaussian_reconstruction_loss(x_hat_mu, x_hat_lnvar, x)
+    return erf_reconstruction_loss(x_hat_mu, x_hat_lnvar, x)
