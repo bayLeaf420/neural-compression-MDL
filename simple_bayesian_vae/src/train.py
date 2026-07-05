@@ -195,7 +195,7 @@ def train_one_epoch(
             image_batch,
             step_key,
             kl_weight_scale,
-            batches,
+            decay,
         )
     assert aux is not None  # at least one batch ran
     return loss, aux, key
