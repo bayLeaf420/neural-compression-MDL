@@ -58,8 +58,8 @@ class BayesianEncoder(nnx.Module):
 
         # Now we don't know output size.
         # We have to use jax.eval_shape
-        dummy_x = jnp.zeros((1, *in_shape), dtype=jnp.float32)
-        dummy_key_batch = jax.random.split(jax.random.PRNGKey(0), 1)  # Shape (1, 2)
+        dummy_x = jnp.zeros((2, *in_shape), dtype=jnp.float32)
+        dummy_key_batch = jax.random.split(jax.random.key(0), 2)  # Shape (1, 2)
 
         def _run_conv_stack(x: jax.Array, key_batch: jax.Array) -> jax.Array:
             """Run the convolution stack.
