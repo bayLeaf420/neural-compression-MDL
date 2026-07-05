@@ -4,6 +4,7 @@ from flax import nnx
 import optax
 import orbax.checkpoint as ocp
 import os
+import matplotlib.pyplot as plt
 
 from models import BayesianVAE
 from losses import (
@@ -48,7 +49,8 @@ def prior_train_step_ema(
     new_z_mu = decay * z_prior_mu + (1 - decay) * batch_mu
 
     new_z_var = decay * jnp.exp(z_prior_lnvar) + (1 - decay) * batch_var
-    new_z_lnvar = jnp.log(new_z_var)
+    new_z_var = jnp.maximum(new_z_var, 1e-6)   # guarantee positivity, JIT-safe
+    new_z_lnvar = jnp.log(new_z_var + 1e-6)
 
     return new_z_mu, new_z_lnvar
 
@@ -185,6 +187,7 @@ def train_one_epoch(
     aux = None
     batches = train_images.shape[0] // batch_size
     decay = float(1 - 1 / batches)
+    
     for image_batch in iterate_shuffled_batches(
         train_images, shuffle_key, batch_size, batches
     ):
@@ -207,6 +210,7 @@ def log_epoch(
     aux: LossAux,
     avg_val_loss: float | jax.Array,
 ) -> None:
+    
     print(
         f"epoch {epoch}: total_loss={loss:.4f}"
         f" reconstruction_loss={aux.reconstruction_loss:.4f}"
@@ -234,6 +238,9 @@ def main() -> None:
     manager = build_checkpoint_manager()
     best_val_loss = float("inf")
 
+    train_loss_array = jnp.zeros((NUM_EPOCHS,))
+    val_loss_array = jnp.zeros((NUM_EPOCHS,))
+
     ### ---- Training loop ---- ###
     for epoch in range(NUM_EPOCHS):
         loss, aux, key = train_one_epoch(
@@ -258,6 +265,21 @@ def main() -> None:
                 save_if_best(manager, model, epoch, avg_val_loss)
 
         log_epoch(epoch, loss, aux, avg_val_loss)
+        train_loss_array = train_loss_array.at[epoch].set(loss)
+        val_loss_array = val_loss_array.at[epoch].set(avg_val_loss)
 
     # Orbax saving is asynchronous, we main() to wait for it to finish saving before returning.
     manager.wait_until_finished() 
+
+    # ---- Plot training graphs ----
+    epoch_range = jnp.arange(0, NUM_EPOCHS)
+    fig, axes = plt.subplots(2, 1, figsize=(6, 8))
+    axes[0].plot(epoch_range, train_loss_array)
+    axes[0].set_xlabel('epochs')
+    axes[0].set_ylabel('Training loss (Nats)')
+    axes[1].plot(epoch_range, val_loss_array)
+    axes[1].set_xlabel('epochs')
+    axes[1].set_ylabel('Validation loss (Nats)')
+    plt.tight_layout()
+    plt.show()
+    
