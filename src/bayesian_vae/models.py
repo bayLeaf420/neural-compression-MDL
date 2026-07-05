@@ -2,9 +2,9 @@ import jax
 import jax.numpy as jnp
 import flax.nnx as nnx
 
-from layers import BayesianLinear, BayesianConv2D, _gaussian_kl_divergence
-from config import EncoderConfig, DecoderConfig, VaeConfig
-from utils import PriorParam
+from .layers import BayesianLinear, BayesianConv2D, _gaussian_kl_divergence
+from .config import EncoderConfig, DecoderConfig, VaeConfig
+from .utils import PriorParam
 
 class BayesianEncoder(nnx.Module):
     """Bayesian Convolutional Encoder.

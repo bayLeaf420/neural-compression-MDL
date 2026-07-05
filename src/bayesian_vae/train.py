@@ -6,16 +6,16 @@ import orbax.checkpoint as ocp
 import os
 import matplotlib.pyplot as plt
 
-from models import BayesianVAE
-from losses import (
+from .models import BayesianVAE
+from .losses import (
     compute_training_loss,
     compute_validation_reconstruction_loss,
     LossAux,
 )
-from config import EncoderConfig, DecoderConfig, ConvConfig, LinConfig, VaeConfig
-from utils import PostLog, PriorParam
+from .config import EncoderConfig, DecoderConfig, ConvConfig, LinConfig, VaeConfig
+from .utils import PostLog, PriorParam
 
-from data_mnist import (
+from .data_mnist import (
     load_mnist_train_images,
     load_mnist_test_images,
     iterate_shuffled_batches,
