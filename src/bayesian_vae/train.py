@@ -237,7 +237,7 @@ def main() -> None:
 
     ### ---- Model / optimizer ---- ###
     model = build_model(model_key)
-    optimizer = nnx.Optimizer(model, optax.adamw(1e-3), wrt=nnx.Param)
+    optimizer = nnx.Optimizer(model, optax.adam(3e-4), wrt=nnx.Param)
 
     ### ---- Checkpointing ---- ###
     manager = build_checkpoint_manager()
