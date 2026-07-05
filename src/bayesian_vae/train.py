@@ -67,8 +67,9 @@ def train_step(
     """
     """
 
-    def loss_fn(model: BayesianVAE) -> tuple[jax.Array, LossAux, PostLog]:
-        return compute_training_loss(model, input_batch, step_key, kl_weight_scale)
+    def loss_fn(model: BayesianVAE) -> tuple[jax.Array, tuple[LossAux, PostLog]]:
+        loss, aux, post_log = compute_training_loss(model, input_batch, step_key, kl_weight_scale)
+        return loss, (aux, post_log)
 
     grad_fn = nnx.value_and_grad(loss_fn, has_aux=True)
     (loss, (aux, post_log)), grad = grad_fn(model)
