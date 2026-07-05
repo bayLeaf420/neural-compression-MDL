@@ -122,7 +122,7 @@ def test_build_model_prior_is_priorparam():
 # ---------------------------------------------------------------------------
 
 def test_train_step_runs_and_returns(model, optimizer, batch):
-    loss, aux = train_step(
+    loss, aux, _ = train_step(
         model, optimizer, batch, jax.random.key(0), jnp.asarray(0.01), DECAY
     )
     assert jnp.isfinite(loss)

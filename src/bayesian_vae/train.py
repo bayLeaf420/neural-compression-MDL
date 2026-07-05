@@ -22,7 +22,8 @@ from .data_mnist import (
     validation_iterator,
 )
 
-CHECKPOINT_DIR = os.path.abspath("./checkpoints")
+
+CHECKPOINT_DIR = os.path.abspath(os.environ.get("CHECKPOINT_DIR", "./checkpoints"))
 NUM_EPOCHS = 50
 BATCH_SIZE = 128
 VALIDATE_EVERY = 5
@@ -105,12 +106,12 @@ def build_model(key: jax.Array) -> BayesianVAE:
             channels=(7, 7, 7),
         ),
         LinConfig(
-            hidden_dims=(638, 492, 394, 296, 197, 98, 45),
+            hidden_dims=(638, 394, 197, 98),
         ),
     )
     decoder_config = DecoderConfig(
         LinConfig(
-            hidden_dims=(98, 148, 197, 247, 296, 345, 394, 492, 638, 711, 784),
+            hidden_dims=(98, 148, 247, 345, 492, 784),
         )
     )
     vae_config = VaeConfig(
