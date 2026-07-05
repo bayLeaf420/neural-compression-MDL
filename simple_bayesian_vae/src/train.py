@@ -238,9 +238,9 @@ def main() -> None:
     manager = build_checkpoint_manager()
     best_val_loss = float("inf")
 
-    train_loss_array = jnp.zeros((NUM_EPOCHS,))
-    val_loss_array = jnp.zeros((NUM_EPOCHS,))
-
+    train_loss_array = []
+    val_loss_array = []
+    
     ### ---- Training loop ---- ###
     for epoch in range(NUM_EPOCHS):
         loss, aux, key = train_one_epoch(
@@ -265,8 +265,8 @@ def main() -> None:
                 save_if_best(manager, model, epoch, avg_val_loss)
 
         log_epoch(epoch, loss, aux, avg_val_loss)
-        train_loss_array = train_loss_array.at[epoch].set(loss)
-        val_loss_array = val_loss_array.at[epoch].set(avg_val_loss)
+        train_loss_array.append(loss)
+        val_loss_array.append(avg_val_loss)
 
     # Orbax saving is asynchronous, we main() to wait for it to finish saving before returning.
     manager.wait_until_finished() 
@@ -274,10 +274,10 @@ def main() -> None:
     # ---- Plot training graphs ----
     epoch_range = jnp.arange(0, NUM_EPOCHS)
     fig, axes = plt.subplots(2, 1, figsize=(6, 8))
-    axes[0].plot(epoch_range, train_loss_array)
+    axes[0].plot(epoch_range, jnp.asarray(train_loss_array))
     axes[0].set_xlabel('epochs')
     axes[0].set_ylabel('Training loss (Nats)')
-    axes[1].plot(epoch_range, val_loss_array)
+    axes[1].plot(epoch_range, jnp.asarray(val_loss_array))
     axes[1].set_xlabel('epochs')
     axes[1].set_ylabel('Validation loss (Nats)')
     plt.tight_layout()

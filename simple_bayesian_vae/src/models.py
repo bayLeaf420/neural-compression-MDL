@@ -40,7 +40,7 @@ class BayesianEncoder(nnx.Module):
         hidden_dims = encoder_config.lin.hidden_dims
 
         # ---- Convolution Stack ----
-        self.conv_layers: list[BayesianConv2D] = []
+        self.conv_layers = nnx.List([]) 
         in_channels = in_shape[-1]
         for kernel_size, stride, out_channels in zip(kernels, strides, channels):
             self.conv_layers.append(
@@ -81,7 +81,7 @@ class BayesianEncoder(nnx.Module):
         flat_dim = int(jnp.prod(conv_shape[1:]))  # drop batch dim
 
         # ---- Dense stack ----
-        self.lin_layers: list[BayesianLinear] = []
+        self.lin_layers = nnx.List([])
         in_features = flat_dim
 
         for hidden_dim in hidden_dims:
@@ -185,7 +185,7 @@ class BayesianDecoder(nnx.Module):
         super().__init__()
 
         self.output_shape = output_shape
-        self.lin_layers: list[BayesianLinear] = []
+        self.lin_layers = nnx.List([])
 
         hidden_dims = decoder_config.lin.hidden_dims
         in_features = z_dim
