@@ -135,6 +135,7 @@ class BayesianLinear(nnx.Module):
             total_kl += _gaussian_kl_divergence(
                 self.b_mu.value, # type: ignore -> FORMATTING WHOLE REPO/THIS FILE REMOVES THIS COMMENT, 
                 self.b_lnvar.value, # type: ignore
+                jnp.array(0.0),
                 self.prior_lnvar,
             )
         return total_kl
@@ -287,6 +288,7 @@ class BayesianConv2D(nnx.Module):
             total_kl += _gaussian_kl_divergence(
                 self.b_mu.value, # type: ignore
                 self.b_lnvar.value, # type: ignore
+                jnp.array(0.0),
                 self.prior_lnvar,
             )
         return total_kl
