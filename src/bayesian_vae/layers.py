@@ -126,15 +126,15 @@ class BayesianLinear(nnx.Module):
     def calculate_kl_divergence(self) -> jax.Array:
         """Calculate KL divergence of weight distribution w.r.t. prior distribution."""
         total_kl = _gaussian_kl_divergence(
-            self.w_mu.value,
-            self.w_lnvar.value,
+            self.w_mu[...],
+            self.w_lnvar[...],
             jnp.array(0.0),
             self.prior_lnvar,
         )
         if self.use_bias:
             total_kl += _gaussian_kl_divergence(
-                self.b_mu.value, # type: ignore -> FORMATTING WHOLE REPO/THIS FILE REMOVES THIS COMMENT, 
-                self.b_lnvar.value, # type: ignore
+                self.b_mu[...], # type: ignore -> FORMATTING WHOLE REPO/THIS FILE REMOVES THIS COMMENT, 
+                self.b_lnvar[...], # type: ignore
                 jnp.array(0.0),
                 self.prior_lnvar,
             )
@@ -279,15 +279,15 @@ class BayesianConv2D(nnx.Module):
     def calculate_kl_divergence(self) -> jax.Array:
         """Calculate KL divergence of weight distribution w.r.t. prior distribution."""
         total_kl = _gaussian_kl_divergence(
-            self.kernel_mean.value,
-            self.kernel_lnvar.value,
+            self.kernel_mean[...],
+            self.kernel_lnvar[...],
             jnp.array(0.0),
             self.prior_lnvar,
         )
         if self.use_bias:
             total_kl += _gaussian_kl_divergence(
-                self.b_mu.value, # type: ignore
-                self.b_lnvar.value, # type: ignore
+                self.b_mu[...], # type: ignore
+                self.b_lnvar[...], # type: ignore
                 jnp.array(0.0),
                 self.prior_lnvar,
             )

@@ -197,15 +197,15 @@ def test_vae_prior_is_priorparam():
     assert isinstance(vae.z_prior_lnvar, PriorParam)
     assert not isinstance(vae.z_prior_mu, nnx.Param) or issubclass(PriorParam, nnx.Param) is False
     # shapes must match z_dim for the per-dimension prior
-    assert vae.z_prior_mu.value.shape == (Z_DIM,)
-    assert vae.z_prior_lnvar.value.shape == (Z_DIM,)
+    assert vae.z_prior_mu[...].shape == (Z_DIM,)
+    assert vae.z_prior_lnvar[...].shape == (Z_DIM,)
 
 
 def test_vae_prior_initialised_standard_normal():
     """Prior should start at N(0, I): mu=0, lnvar=0."""
     vae = _make_vae()
-    assert jnp.allclose(vae.z_prior_mu.value, 0.0), "prior mean should init to 0"
-    assert jnp.allclose(vae.z_prior_lnvar.value, 0.0), "prior lnvar should init to 0"
+    assert jnp.allclose(vae.z_prior_mu[...], 0.0), "prior mean should init to 0"
+    assert jnp.allclose(vae.z_prior_lnvar[...], 0.0), "prior lnvar should init to 0"
 
 
 def test_vae_latent_kl_zero_at_init_if_posterior_matches_prior():

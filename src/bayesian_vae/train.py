@@ -50,7 +50,7 @@ def prior_train_step_ema(
 
     new_z_var = decay * jnp.exp(z_prior_lnvar) + (1 - decay) * batch_var
     new_z_var = jnp.maximum(new_z_var, 1e-6)   # guarantee positivity, JIT-safe
-    new_z_lnvar = jnp.log(new_z_var + 1e-6)
+    new_z_lnvar = jnp.log(new_z_var)
 
     return new_z_mu, new_z_lnvar
 
@@ -63,7 +63,7 @@ def train_step(
     step_key: jax.Array,
     kl_weight_scale: jax.Array,
     decay: float,
-) -> tuple[jax.Array, LossAux]:
+) -> tuple[jax.Array, LossAux, PostLog]:
     """
     """
 
@@ -78,14 +78,14 @@ def train_step(
     optimizer.update(model, grad)
 
     # Update model's prior
-    model.z_prior_mu.value, model.z_prior_lnvar.value = prior_train_step_ema(
-        model.z_prior_mu.value, 
-        model.z_prior_lnvar.value,
+    model.z_prior_mu[...], model.z_prior_lnvar[...] = prior_train_step_ema(
+        model.z_prior_mu[...], 
+        model.z_prior_lnvar[...],
         post_log.z_mu,
         post_log.z_lnvar,
         decay,
     )
-    return loss, aux
+    return loss, aux, post_log
 
 
 @nnx.jit
@@ -180,6 +180,7 @@ def train_one_epoch(
     train_images: jax.Array,
     kl_weight_scale: jax.Array,
     batch_size: int,
+    epoch: int,
     key: jax.Array,
 ) -> tuple[jax.Array, LossAux, jax.Array]:
     """Returns (last_loss, last_aux, updated_key)."""
@@ -193,7 +194,7 @@ def train_one_epoch(
         train_images, shuffle_key, batch_size, batches
     ):
         key, step_key = jax.random.split(key)
-        loss, aux = train_step(
+        loss, aux, post_log = train_step(
             model,
             optimizer,
             image_batch,
@@ -201,6 +202,8 @@ def train_one_epoch(
             kl_weight_scale,
             decay,
         )
+        if float(jnp.max(post_log.z_lnvar)) > 15.0:   # Detect unstable training
+            print(f"WARNING: z_lnvar max ... at epoch {epoch}")
     assert aux is not None  # at least one batch ran
     return loss, aux, key
 
@@ -250,6 +253,7 @@ def main() -> None:
             train_images,
             kl_weight_scale,
             BATCH_SIZE,
+            epoch,
             key,
         )
         avg_val_loss = float("nan")

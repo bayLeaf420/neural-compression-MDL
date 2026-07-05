@@ -6,6 +6,8 @@ from .layers import BayesianLinear, BayesianConv2D, _gaussian_kl_divergence
 from .config import EncoderConfig, DecoderConfig, VaeConfig
 from .utils import PriorParam
 
+MIN_VALID_DIM = 2
+
 class BayesianEncoder(nnx.Module):
     """Bayesian Convolutional Encoder.
 
@@ -78,6 +80,14 @@ class BayesianEncoder(nnx.Module):
         # jax.eval_shape outputs a struct, we need to convert it to a jax.Array before running jnp.prod
         conv_out = jax.eval_shape(_run_conv_stack, dummy_x, dummy_key_batch)
         conv_shape = jnp.asarray(conv_out.shape)
+
+        h_out, w_out = conv_shape[1], conv_shape[2]
+        if h_out < MIN_VALID_DIM or w_out < MIN_VALID_DIM:
+            raise ValueError(
+                f"Conv stack collapsed to {h_out}, {w_out}\n"
+                f"too much downsampling for input {in_shape}."
+            )
+
         flat_dim = int(jnp.prod(conv_shape[1:]))  # drop batch dim
 
         # ---- Dense stack ----
@@ -347,8 +357,8 @@ class BayesianVAE(nnx.Module):
             """For single sample, to be jax.vmap-ped over batch"""
             return _gaussian_kl_divergence(
                 z_mu, z_lnvar, 
-                self.z_prior_mu.value, 
-                self.z_prior_lnvar.value,
+                self.z_prior_mu[...], 
+                self.z_prior_lnvar[...],
                 )
 
         return jax.vmap(_single_example_latent_kl_divergence, in_axes=(0, 0))(
