@@ -58,8 +58,8 @@ class BayesianEncoder(nnx.Module):
 
         # Now we don't know output size.
         # We have to use jax.eval_shape
-        dummy_x = jnp.zeros((2, *in_shape), dtype=jnp.float32)
-        dummy_key_batch = jax.random.split(jax.random.key(0), 2)  # Shape (1, 2)
+        dummy_x = jnp.zeros((1, *in_shape), dtype=jnp.float32)
+        dummy_key_batch = jax.random.split(jax.random.key(0), 1)  # Shape (1,)
 
         def _run_conv_stack(x: jax.Array, key_batch: jax.Array) -> jax.Array:
             """Run the convolution stack.
@@ -76,8 +76,9 @@ class BayesianEncoder(nnx.Module):
             return x
 
         # jax.eval_shape outputs a struct, we need to convert it to a jax.Array before running jnp.prod
-        conv_out_shape = jnp.asarray(jax.eval_shape(_run_conv_stack, dummy_x, dummy_key_batch))
-        flat_dim = int(jnp.prod(conv_out_shape[1:]))  # drop batch dim
+        conv_out = jax.eval_shape(_run_conv_stack, dummy_x, dummy_key_batch)
+        conv_shape = jnp.asarray(conv_out.shape)
+        flat_dim = int(jnp.prod(conv_shape[1:]))  # drop batch dim
 
         # ---- Dense stack ----
         self.lin_layers: list[BayesianLinear] = []
