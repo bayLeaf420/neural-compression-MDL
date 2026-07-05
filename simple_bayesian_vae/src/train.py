@@ -12,6 +12,7 @@ from losses import (
     LossAux,
 )
 from config import EncoderConfig, DecoderConfig, ConvConfig, LinConfig, VaeConfig
+from utils import PostLog, PriorParam
 
 from data_mnist import (
     load_mnist_train_images,
@@ -26,24 +27,61 @@ BATCH_SIZE = 128
 VALIDATE_EVERY = 5
 MASTER_KEY = 47
 
+def prior_train_step_ema(
+        z_prior_mu: jax.Array, z_prior_lnvar: jax.Array,
+        z_mu: jax.Array, z_lnvar: jax.Array, 
+        decay: float,
+        ) -> tuple[jax.Array, jax.Array]:
+    """Seperate update rule for PriorParam. We run this after running
 
-@nnx.jit  # JIT compile this thing
+    Args: 
+        z_prior_mu: Current prior mean
+        z_prior_lnvar: Current prior natural log-variance
+        z_mu: Posterior mean of latent
+        z_lnvar: Posterior lnvar of latent
+        decay: -->1 ==> Slower updates to prior.
+    """
+    # aggregate posterior over the batch
+    batch_mu = jnp.mean(z_mu, axis=0)                    # [z_dim]
+    batch_var = jnp.mean(jnp.exp(z_lnvar) + z_mu**2, axis=0) - batch_mu**2
+    
+    new_z_mu = decay * z_prior_mu + (1 - decay) * batch_mu
+
+    new_z_var = decay * jnp.exp(z_prior_lnvar) + (1 - decay) * batch_var
+    new_z_lnvar = jnp.log(new_z_var)
+
+    return new_z_mu, new_z_lnvar
+
+
+@nnx.jit(static_argnames=('decay',))  # JIT compile this thing
 def train_step(
     model: BayesianVAE,
     optimizer: nnx.Optimizer,
     input_batch: jax.Array,
     step_key: jax.Array,
     kl_weight_scale: jax.Array,
+    decay: float,
 ) -> tuple[jax.Array, LossAux]:
+    """
+    """
 
-    def loss_fn(model: BayesianVAE) -> tuple[jax.Array, LossAux]:
+    def loss_fn(model: BayesianVAE) -> tuple[jax.Array, LossAux, PostLog]:
         return compute_training_loss(model, input_batch, step_key, kl_weight_scale)
 
     grad_fn = nnx.value_and_grad(loss_fn, has_aux=True)
-    (loss, aux), grad = grad_fn(model)
+    (loss, (aux, post_log)), grad = grad_fn(model)
 
     # Update 'model''s params and 'optimizer''s opt_state in place
     optimizer.update(model, grad)
+
+    # Update model's prior
+    model.z_prior_mu.value, model.z_prior_lnvar.value = prior_train_step_ema(
+        model.z_prior_mu.value, 
+        model.z_prior_lnvar.value,
+        post_log.z_mu,
+        post_log.z_lnvar,
+        decay,
+    )
     return loss, aux
 
 
@@ -77,7 +115,6 @@ def build_model(key: jax.Array) -> BayesianVAE:
         decoder_config=decoder_config,
         z_dim = 45,
         w_prior_lnvar=0.0,
-        z_prior_lnvar=0.0,
     )
 
     return BayesianVAE(
@@ -108,7 +145,7 @@ def save_if_best(
     Args:
 
     """
-    params = nnx.state(model, nnx.Param)
+    params = nnx.state(model, (nnx.Param, PriorParam))
     manager.save(
         epoch,
         args=ocp.args.StandardSave(params),
@@ -147,6 +184,7 @@ def train_one_epoch(
     loss = jnp.asarray(0.0)
     aux = None
     batches = train_images.shape[0] // batch_size
+    decay = float(1 - 1 / batches)
     for image_batch in iterate_shuffled_batches(
         train_images, shuffle_key, batch_size, batches
     ):
@@ -157,6 +195,7 @@ def train_one_epoch(
             image_batch,
             step_key,
             kl_weight_scale,
+            batches,
         )
     assert aux is not None  # at least one batch ran
     return loss, aux, key

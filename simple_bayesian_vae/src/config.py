@@ -30,4 +30,4 @@ class VaeConfig:
     decoder_config: DecoderConfig
     z_dim: int
     w_prior_lnvar: float
-    z_prior_lnvar: float
+   

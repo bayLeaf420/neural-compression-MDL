@@ -2,9 +2,9 @@ import jax
 import jax.numpy as jnp
 import flax.nnx as nnx
 
-from layers import BayesianLinear, BayesianConv2D, gaussian_kl_divergence
+from layers import BayesianLinear, BayesianConv2D, _gaussian_kl_divergence
 from config import EncoderConfig, DecoderConfig, VaeConfig
-
+from utils import PriorParam
 
 class BayesianEncoder(nnx.Module):
     """Bayesian Convolutional Encoder.
@@ -272,7 +272,6 @@ class BayesianVAE(nnx.Module):
         decoder_config = config.decoder_config
         z_dim = config.z_dim
         w_prior_lnvar = config.w_prior_lnvar
-        z_prior_lnvar = config.z_prior_lnvar
 
         self.encoder = BayesianEncoder(
             in_shape,
@@ -291,8 +290,9 @@ class BayesianVAE(nnx.Module):
             rngs=rngs,
         )
 
-        # self.w_prior_lnvar = w_prior_lnvar NOT NEEDED
-        self.z_prior_lnvar = z_prior_lnvar
+        # Prior will be a gaussian. Initialised as N(0, I).
+        self.z_prior_mu = PriorParam(jnp.zeros((z_dim,)))
+        self.z_prior_lnvar = PriorParam(jnp.zeros((z_dim,)))
 
     def __call__(
         self,
@@ -338,13 +338,17 @@ class BayesianVAE(nnx.Module):
         """Calculate KL divergence of latent w.r.t. the same prior_lnvar as weights for simplicity.
         
         Args:
-            z_mu: Mean of latent distribution
-            z_lnvar: ln(variance) of latent distribution.
+            z_mu: Mean of latent posterior distribution
+            z_lnvar: ln(variance) of latent posterior distribution.
         """
 
         def _single_example_latent_kl_divergence(z_mu, z_lnvar):
             """For single sample, to be jax.vmap-ped over batch"""
-            return gaussian_kl_divergence(z_mu, z_lnvar, self.z_prior_lnvar)
+            return _gaussian_kl_divergence(
+                z_mu, z_lnvar, 
+                self.z_prior_mu.value, 
+                self.z_prior_lnvar.value,
+                )
 
         return jax.vmap(_single_example_latent_kl_divergence, in_axes=(0, 0))(
             z_mu, z_lnvar

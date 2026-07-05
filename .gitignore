@@ -17,6 +17,7 @@ ENV/
 *.ntvs*
 *.njsproj
 *.sln
+.ruff_cache/
 
 # ==========================================
 # Python Bytecode (Crucial for teammates)

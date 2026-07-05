@@ -3,6 +3,7 @@ import jax.numpy as jnp
 from flax import struct
 
 from models import BayesianVAE
+from utils import PostLog
 
 
 @struct.dataclass
@@ -38,7 +39,7 @@ def compute_training_loss(
     x: jax.Array,
     key: jax.Array,
     kl_weight_scale: jax.Array,
-) -> tuple[jax.Array, LossAux]:
+) -> tuple[jax.Array, LossAux, PostLog]:
     """Computes training loss of VAE.
 
     Args:
@@ -65,7 +66,7 @@ def compute_training_loss(
 
     total_loss = reconstruction_loss + latent_kl_loss + weight_kl_loss
 
-    return total_loss, LossAux(reconstruction_loss, latent_kl_loss, weight_kl_loss)
+    return total_loss, LossAux(reconstruction_loss, latent_kl_loss, weight_kl_loss), PostLog(z_mu, z_lnvar)
 
 
 def compute_validation_reconstruction_loss(
