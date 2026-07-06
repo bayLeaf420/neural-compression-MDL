@@ -8,7 +8,6 @@ import matplotlib.pyplot as plt
 from bayesian_vae.train import (
     BATCH_SIZE,
     VALIDATE_EVERY,
-    MASTER_KEY,
     build_model,
     build_checkpoint_manager,
     save_if_best,
@@ -24,12 +23,12 @@ from bayesian_vae.data_mnist import (
 
 from bayesian_vae.models import PriorParam
 
-# Redefine NUM_EPOCHS 
+# Redefine NUM_EPOCHS and MASTER_KEY
 NUM_EPOCHS = 400
+MASTER_KEY = 56
 
 def main() -> None:
     key = jax.random.key(MASTER_KEY)
-    key, model_key = jax.random.split(key)
 
     ### ---- Get data ---- ###
     train_images = load_mnist_train_images()
