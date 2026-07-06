@@ -365,7 +365,7 @@ class BayesianVAE(nnx.Module):
             """For single sample, to be jax.vmap-ped over batch"""
             return jnp.sum(_elementwise_latent_kl(z_mu, z_lnvar))
 
-        return jax.vmap(_single_example_latent_kl_divergence, in_axes=(0, 0, None))(
+        return jax.vmap(_single_example_latent_kl_divergence, in_axes=(0, 0))(
             z_mu, z_lnvar,
         )
 

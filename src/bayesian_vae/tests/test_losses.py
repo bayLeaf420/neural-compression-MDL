@@ -4,8 +4,10 @@ import jax.numpy as jnp
 import flax.nnx as nnx
 import pytest
 
+### RUN WITH: uv run pytest ./src/bayesian_vae/tests/test_losses.py -v ###
+
 from bayesian_vae.losses import (
-    gaussian_reconstruction_loss,
+    erf_reconstruction_loss,
     compute_training_loss,
     compute_validation_reconstruction_loss,
     LossAux,
@@ -37,6 +39,7 @@ def _tiny_vae_config():
         decoder_config=DecoderConfig(LinConfig(hidden_dims=(16, 32))),
         z_dim=Z_DIM,
         w_prior_lnvar=0.0,
+        z_free_nats=0.5,
     )
 
 
@@ -52,69 +55,62 @@ def batch():
 
 
 # ---------------------------------------------------------------------------
-# gaussian_reconstruction_loss — the numerically load-bearing function
+# erf_reconstruction_loss — the numerically load-bearing function
 # ---------------------------------------------------------------------------
 
-def test_recon_loss_returns_scalar():
-    B = 3
-    shape = (B, *IN_SHAPE)
-    mean = jnp.zeros(shape)
-    lnvar = jnp.zeros(shape)
-    target = jnp.zeros(shape)
-    loss = gaussian_reconstruction_loss(mean, lnvar, target)
-    assert loss.shape == (), f"expected scalar, got {loss.shape}"
-
-
-def test_recon_loss_perfect_prediction_unit_variance():
-    """When mean == target and lnvar == 0 (var=1), NLL per pixel = 0.5*log(2pi)*... 
-    Actually with the code's formula (no 2pi constant): 0.5*lnvar + 0.5*exp(-lnvar)*(t-m)^2.
-    With lnvar=0 and t==m: per-pixel = 0. Summed = 0, mean = 0."""
+def test_recon_loss_is_nonnegative():
+    """Discretized NLL is -log(probability mass), and mass <= 1, so NLL >= 0 always.
+    This is THE key property that fixed the negative-loss pathology."""
+    key = jax.random.key(0)
     shape = (2, *IN_SHAPE)
-    x = jnp.ones(shape)
-    loss = gaussian_reconstruction_loss(x, jnp.zeros(shape), x)  # mean==target, lnvar=0
-    assert jnp.allclose(loss, 0.0, atol=1e-6), f"expected 0, got {loss}"
+    mean = jax.random.uniform(key, shape)          # in [0,1], valid pixel range
+    lnvar = jax.random.normal(jax.random.split(key)[0], shape)
+    target = jax.random.uniform(jax.random.split(key)[1], shape)
+    loss = erf_reconstruction_loss(mean, lnvar, target)
+    assert loss >= 0.0, f"discretized NLL must be non-negative, got {loss}"
 
 
-def test_recon_loss_closed_form_known_value():
-    """Hand-computed: single pixel, mean=0, lnvar=0 (var=1), target=2.
-    per-pixel NLL = 0.5*0 + 0.5*exp(0)*(2-0)^2 = 0.5*4 = 2.0
-    Summed over 1 pixel, mean over batch of 1 = 2.0"""
-    mean = jnp.zeros((1, 1, 1, 1))
-    lnvar = jnp.zeros((1, 1, 1, 1))
-    target = jnp.full((1, 1, 1, 1), 2.0)
-    loss = gaussian_reconstruction_loss(mean, lnvar, target)
-    assert jnp.allclose(loss, 2.0, atol=1e-6), f"expected 2.0, got {loss}"
+def test_recon_loss_confident_correct_is_low():
+    """Perfect prediction (mean==target) with SMALL variance concentrates mass
+    in the correct bin -> NLL near 0. Small variance so the bin captures most mass."""
+    shape = (1, 4, 4, 1)
+    target = jnp.full(shape, 0.5)                  # mid-range pixel
+    mean = jnp.full(shape, 0.5)                    # perfect prediction
+    lnvar = jnp.full(shape, -14.0)                 # tiny variance: std ~ 9e-4 ~ bin width
+    loss = erf_reconstruction_loss(mean, lnvar, target)
+    # With std ~ bin width and perfect centering, most mass is in the bin,
+    # so NLL should be small (near 0, well under 1 per pixel).
+    assert loss < 1.0, f"confident correct prediction should give low NLL, got {loss}"
 
 
-def test_recon_loss_variance_term():
-    """With target==mean, only the 0.5*lnvar term survives.
-    lnvar=2.0 over 4 pixels: per-pixel = 0.5*2 = 1.0, sum = 4.0, mean over B=1 = 4.0"""
-    mean = jnp.zeros((1, 2, 2, 1))
-    lnvar = jnp.full((1, 2, 2, 1), 2.0)
-    target = jnp.zeros((1, 2, 2, 1))
-    loss = gaussian_reconstruction_loss(mean, lnvar, target)
-    # 4 pixels * (0.5 * 2.0) = 4.0
-    assert jnp.allclose(loss, 4.0, atol=1e-6), f"expected 4.0, got {loss}"
+def test_recon_loss_confident_wrong_is_high():
+    """Confident (small variance) but WRONG prediction -> almost no mass in the
+    target's bin -> large NLL. This is the behaviour that penalises overconfidence."""
+    shape = (1, 4, 4, 1)
+    target = jnp.full(shape, 0.9)
+    mean = jnp.full(shape, 0.1)                    # confidently predicts wrong value
+    lnvar = jnp.full(shape, -14.0)                 # tiny variance
+    loss = erf_reconstruction_loss(mean, lnvar, target)
+    assert loss > 10.0, f"confident wrong prediction should give high NLL, got {loss}"
 
 
-def test_recon_loss_larger_error_gives_larger_loss():
-    """Monotonicity: bigger prediction error => bigger NLL (at fixed variance)."""
-    shape = (1, *IN_SHAPE)
-    mean = jnp.zeros(shape)
+def test_recon_loss_wrong_worse_than_right():
+    """Monotonicity: at fixed variance, a worse prediction gives higher NLL."""
+    shape = (1, 4, 4, 1)
+    target = jnp.full(shape, 0.5)
     lnvar = jnp.zeros(shape)
-    small_err = gaussian_reconstruction_loss(mean, lnvar, jnp.full(shape, 0.1))
-    large_err = gaussian_reconstruction_loss(mean, lnvar, jnp.full(shape, 1.0))
-    assert large_err > small_err
+    close = erf_reconstruction_loss(jnp.full(shape, 0.5), lnvar, target)   # perfect
+    far = erf_reconstruction_loss(jnp.full(shape, 0.1), lnvar, target)     # off
+    assert far > close, "worse prediction should give higher NLL"
 
 
 def test_recon_loss_is_finite():
     shape = (2, *IN_SHAPE)
-    key = jax.random.key(0)
-    mean = jax.random.normal(key, shape)
-    lnvar = jax.random.normal(jax.random.split(key)[0], shape)
-    target = jax.random.normal(jax.random.split(key)[1], shape)
-    loss = gaussian_reconstruction_loss(mean, lnvar, target)
-    assert jnp.isfinite(loss)
+    key = jax.random.key(3)
+    mean = jax.random.uniform(key, shape)
+    lnvar = jnp.zeros(shape)
+    target = jax.random.uniform(jax.random.split(key)[1], shape)
+    assert jnp.isfinite(erf_reconstruction_loss(mean, lnvar, target))
 
 
 # ---------------------------------------------------------------------------
@@ -209,5 +205,5 @@ def test_validation_loss_is_pure_reconstruction(vae, batch):
 # runs the non-fixture tests. Use pytest for the full suite.
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
-    print("Run with: uv run pytest tests/test_losses.py -v")
+    print("Run with: uv run pytest bayesian_vae/tests/test_losses.py -v")
     print("(This file uses pytest fixtures, so the manual runner is limited.)")

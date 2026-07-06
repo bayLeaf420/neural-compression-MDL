@@ -14,7 +14,7 @@ class LossAux:
 
 
 def erf_reconstruction_loss(mean, lnvar, target, num_bins=256):
-    lnvar = jnp.clip(lnvar, -12.0, 12.0)
+    lnvar = jnp.clip(lnvar, -25.0, 25.0) # Prevent lnvar from going to useless values.
     std = jnp.exp(0.5 * lnvar)
     half_bin = 0.5 / (num_bins - 1)      # half the bin width, on [0,1] scale
     # standardized upper/lower bin edges

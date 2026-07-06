@@ -40,6 +40,7 @@ def _tiny_vae_config():
         decoder_config=_tiny_decoder_config(),
         z_dim=Z_DIM,
         w_prior_lnvar=0.0,
+        z_free_nats=0.5,
     )
 
 
@@ -208,15 +209,14 @@ def test_vae_prior_initialised_standard_normal():
     assert jnp.allclose(vae.z_prior_lnvar[...], 0.0), "prior lnvar should init to 0"
 
 
-def test_vae_latent_kl_zero_at_init_if_posterior_matches_prior():
-    """Sanity: if posterior equals the (standard normal) prior, latent KL ~ 0.
-    Feeds z_mu=0, z_lnvar=0, which equals the freshly-initialised prior."""
+def test_vae_latent_kl_flooring():
+    """Sanity: Check if flooring is preventing posterior collapse - i.e. posterior == prior should not give KL == 0"""
     vae = _make_vae()
     B = 4
     z_mu = jnp.zeros((B, Z_DIM))
     z_lnvar = jnp.zeros((B, Z_DIM))
     kl = vae.calculate_latent_kl_divergence(z_mu, z_lnvar)
-    assert jnp.allclose(kl, 0.0, atol=1e-5), f"KL should be ~0 when post==prior, got {kl}"
+    assert jnp.any(jnp.logical_not(jnp.isclose(kl, 0.0, atol=1e-03))), f"KL should not be ~0 when post==prior, got {kl}"
 
 
 def test_vae_state_includes_prior_for_checkpointing():
