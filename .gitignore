@@ -72,3 +72,5 @@ plots/*
 !plots/.gitkeep
 tests/*
 !tests/.gitkeep
+data/*
+!data/.gitkeep

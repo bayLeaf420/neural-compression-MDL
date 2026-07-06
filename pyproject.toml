@@ -11,8 +11,6 @@ dependencies = [
     "numpy>=2.5.1",
     "optax==0.2.8",
     "orbax-checkpoint==0.12.1",
-    "torch>=2.12.1",
-    "torchvision>=0.27.1",
 ]
 
 [build-system]
