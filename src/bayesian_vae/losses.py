@@ -2,8 +2,8 @@ import jax
 import jax.numpy as jnp
 from flax import struct
 
-from .models import BayesianVAE
-from .utils import PostLog
+from bayesian_vae.models import BayesianVAE
+from bayesian_vae.utils import PostLog
 
 
 @struct.dataclass

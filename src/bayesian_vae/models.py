@@ -2,9 +2,9 @@ import jax
 import jax.numpy as jnp
 import flax.nnx as nnx
 
-from .layers import BayesianLinear, BayesianConv2D
-from .config import EncoderConfig, DecoderConfig, VaeConfig
-from .utils import PriorParam
+from bayesian_vae.layers import BayesianLinear, BayesianConv2D
+from bayesian_vae.config import EncoderConfig, DecoderConfig, VaeConfig
+from bayesian_vae.utils import PriorParam
 
 MIN_VALID_DIM = 2
 
