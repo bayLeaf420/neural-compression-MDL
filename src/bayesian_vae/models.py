@@ -2,7 +2,7 @@ import jax
 import jax.numpy as jnp
 import flax.nnx as nnx
 
-from .layers import BayesianLinear, BayesianConv2D, _gaussian_kl_divergence
+from .layers import BayesianLinear, BayesianConv2D
 from .config import EncoderConfig, DecoderConfig, VaeConfig
 from .utils import PriorParam
 
@@ -282,6 +282,7 @@ class BayesianVAE(nnx.Module):
         encoder_config = config.encoder_config
         decoder_config = config.decoder_config
         z_dim = config.z_dim
+        self.z_free_nats = config.z_free_nats
         w_prior_lnvar = config.w_prior_lnvar
 
         self.encoder = BayesianEncoder(
@@ -327,6 +328,7 @@ class BayesianVAE(nnx.Module):
         enc_key, sampling_key, dec_key = jax.random.split(key, 3)
         z_mu, z_lnvar = self.encoder(x, enc_key)  # Each [B, z_dim]
 
+        
         def _single_example_latent_sample(example_key, z_mu, z_lnvar):
             """To be Vmapped function decoding a single latent.
 
@@ -352,17 +354,19 @@ class BayesianVAE(nnx.Module):
             z_mu: Mean of latent posterior distribution
             z_lnvar: ln(variance) of latent posterior distribution.
         """
+        def _elementwise_latent_kl(z_mu, z_lnvar):
+            elementwise_kl = 0.5 * (self.z_prior_lnvar - z_lnvar 
+                            + jnp.exp(z_lnvar - self.z_prior_lnvar)
+                            + jnp.exp(-self.z_prior_lnvar) * (z_mu - self.z_prior_mu)**2) - 0.5
+            floored_kl = jnp.maximum(jnp.asarray(self.z_free_nats), elementwise_kl)
+            return floored_kl
 
         def _single_example_latent_kl_divergence(z_mu, z_lnvar):
             """For single sample, to be jax.vmap-ped over batch"""
-            return _gaussian_kl_divergence(
-                z_mu, z_lnvar, 
-                self.z_prior_mu[...], 
-                self.z_prior_lnvar[...],
-                )
+            return jnp.sum(_elementwise_latent_kl(z_mu, z_lnvar))
 
-        return jax.vmap(_single_example_latent_kl_divergence, in_axes=(0, 0))(
-            z_mu, z_lnvar
+        return jax.vmap(_single_example_latent_kl_divergence, in_axes=(0, 0, None))(
+            z_mu, z_lnvar,
         )
 
     def calculate_vae_weights_kl_divergence(self):

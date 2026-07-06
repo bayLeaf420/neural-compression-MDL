@@ -26,7 +26,7 @@ def erf_reconstruction_loss(mean, lnvar, target, num_bins=256):
     prob = cdf(upper) - cdf(lower)                 # probability mass in the bin
     prob = jnp.clip(prob, 1e-12, 1.0)              # avoid log(0)
     nll = -jnp.log(prob)                           # non-negative, in NATS
-    return jnp.mean(jnp.sum(nll, axis=(1, 2, 3)))
+    return jnp.mean(jnp.sum(nll, axis=(1, 2, 3))) # [B, H, W, C]
 
 
 def compute_training_loss(

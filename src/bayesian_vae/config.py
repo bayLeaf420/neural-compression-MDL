@@ -29,5 +29,6 @@ class VaeConfig:
     encoder_config: EncoderConfig
     decoder_config: DecoderConfig
     z_dim: int
+    z_free_nats: float
     w_prior_lnvar: float
    

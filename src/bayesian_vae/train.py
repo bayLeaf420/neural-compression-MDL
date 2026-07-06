@@ -119,6 +119,7 @@ def build_model(key: jax.Array) -> BayesianVAE:
         decoder_config=decoder_config,
         z_dim = 45,
         w_prior_lnvar=0.0,
+        z_free_nats=0.5,
     )
 
     return BayesianVAE(
