@@ -112,6 +112,11 @@ def build_model(key: jax.Array) -> BayesianVAE:
     decoder_config = DecoderConfig(
         LinConfig(
             hidden_dims=(55, 124, 345, 492, 784),
+        ),
+        ConvConfig(
+            kernels = ((3, 3), (3, 3),  (3, 3)),
+            strides=((1, 1), (1, 1), (1, 1)),
+            channels = ((5, 5, 5, 5)),
         )
     )
     vae_config = VaeConfig(

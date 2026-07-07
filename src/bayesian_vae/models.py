@@ -74,7 +74,7 @@ class BayesianEncoder(nnx.Module):
                 x: Output of shape [B, H, W, C_out_last]
             """
             for conv_layer in self.conv_layers:
-                x = jax.nn.relu(conv_layer(x, key_batch))
+                x = jax.nn.tanh(conv_layer(x, key_batch))
             return x
 
         # jax.eval_shape outputs a struct, we need to convert it to a jax.Array before running jnp.prod
@@ -135,14 +135,14 @@ class BayesianEncoder(nnx.Module):
         hidden = x
         for conv_layer in self.conv_layers:
             key_batch = jax.random.split(layer_keys[k_i], batch_size)
-            hidden = jax.nn.relu(conv_layer(hidden, key_batch))
+            hidden = jax.nn.tanh(conv_layer(hidden, key_batch))
             k_i += 1
 
         hidden = hidden.reshape((batch_size, -1))  # Flatten (H, W, C) -> (H*W*C,)
 
         for lin_layer in self.lin_layers:
             key_batch = jax.random.split(layer_keys[k_i], batch_size)
-            hidden = jax.nn.relu(lin_layer(hidden, key_batch))
+            hidden = jax.nn.tanh(lin_layer(hidden, key_batch))
             k_i += 1
 
         mean_keys = jax.random.split(layer_keys[k_i], batch_size)
@@ -206,14 +206,74 @@ class BayesianDecoder(nnx.Module):
                 )
             )
             in_features = hidden_dim
-
+        
         flat_dim = int(output_shape[0] * output_shape[1] * output_shape[2])
+
         self.lin_last_mean = BayesianLinear(
             in_features, flat_dim, prior_lnvar=prior_lnvar, rngs=rngs
         )
         self.lin_last_lnvar = BayesianLinear(
             in_features, flat_dim, prior_lnvar=prior_lnvar, rngs=rngs
         )
+
+        # ---- Convolution Stack ----
+        kernels = decoder_config.conv.kernels
+        strides = decoder_config.conv.strides
+        channels =decoder_config.conv.channels
+
+        hidden_dims = decoder_config.lin.hidden_dims
+
+        
+        self.conv_layers = nnx.List([]) 
+        in_channels = output_shape[-1]
+        for kernel_size, stride, out_channels in zip(kernels, strides, channels):
+            self.conv_layers.append(
+                BayesianConv2D(
+                    in_channels=in_channels,
+                    out_channels=out_channels,
+                    kernel_size=kernel_size,
+                    strides=stride,
+                    padding="SAME",
+                    prior_lnvar=prior_lnvar,
+                    rngs=rngs,
+                )
+            )
+            in_channels = out_channels
+
+        dummy_x = jnp.zeros((1, *output_shape), dtype=jnp.float32)
+        dummy_key_batch = jax.random.split(jax.random.key(0), 1)  # Shape (1,)
+
+        def _run_conv_stack(x: jax.Array, key_batch: jax.Array) -> jax.Array:
+            """Run the convolution stack.
+
+            Args:
+                x: Input image of shape [B, H, W, C_in]
+                key_batch: Inputted PRNG keys of shape [B,]
+            
+            Returns:
+                x: Output of shape [B, H, W, C_out_last]
+            """
+            for conv_layer in self.conv_layers:
+                x = jax.nn.tanh(conv_layer(x, key_batch))
+            return x
+
+        # jax.eval_shape outputs a struct, we need to convert it to a jax.Array before running jnp.prod
+        conv_out = jax.eval_shape(_run_conv_stack, dummy_x, dummy_key_batch)
+        conv_shape = jnp.asarray(conv_out.shape)
+
+        h_out, w_out = conv_shape[1], conv_shape[2]
+        if h_out < MIN_VALID_DIM or w_out < MIN_VALID_DIM:
+            raise ValueError(
+                f"Conv stack collapsed to {h_out}, {w_out}\n"
+                f"too much downsampling for input {output_shape}."
+            )
+
+        flat_dim = int(jnp.prod(conv_shape[1:]))  # drop batch dim
+
+        # ---- Final linear ---- 
+        self.final_lin_mu = BayesianLinear(flat_dim, flat_dim, prior_lnvar=prior_lnvar, rngs=rngs)
+        self.final_lin_lnvar = BayesianLinear(flat_dim, flat_dim, prior_lnvar=prior_lnvar, rngs=rngs)
+
 
     def __call__(self, z: jax.Array, key: jax.Array) -> tuple[jax.Array, jax.Array]:
         """Decode a sampled latent into an image distribution.
@@ -228,25 +288,49 @@ class BayesianDecoder(nnx.Module):
         """
         batch_size = z.shape[0]  # shape is (B, z_dim)
 
-        num_layers = len(self.lin_layers) + 2
-        layer_keys = jax.random.split(key, num_layers)
+        num_lin_layers = len(self.lin_layers) + 2
+        layer_keys = jax.random.split(key, num_lin_layers)
         k_i = 0
 
         hidden = z
         for lin_layer in self.lin_layers:
             key_batch = jax.random.split(layer_keys[k_i], batch_size)
-            hidden = jax.nn.relu(lin_layer(hidden, key_batch))
+            hidden = jax.nn.tanh(lin_layer(hidden, key_batch))
             k_i += 1
 
         key_batch = jax.random.split(layer_keys[k_i], batch_size)
         x_hat_mu = self.lin_last_mean(hidden, key_batch)
         k_i += 1
 
-        key_batch = jax.random.split(layer_keys[k_i], batch_size)
+        conv_key, lin_key = jax.random.split(layer_keys[k_i])
+        key_batch = jax.random.split(lin_key, batch_size)
         x_hat_lnvar = self.lin_last_lnvar(hidden, key_batch)
 
         x_hat_mu = x_hat_mu.reshape((batch_size, *self.output_shape))
         x_hat_lnvar = x_hat_lnvar.reshape((batch_size, *self.output_shape))
+
+        # ---- Convolution Stack ----
+        num_conv_layers = 2 * len(self.conv_layers) + 2
+        layer_keys = jax.random.split(conv_key, num_conv_layers)
+        k_i = 0
+        for conv_layer in self.conv_layers:
+            key_batch_mu = jax.random.split(layer_keys[k_i], batch_size)
+            k_i += 1
+            x_hat_mu = jax.nn.tanh(conv_layer(x_hat_mu, key_batch_mu))
+            k_i += 1
+            key_batch_lnvar = jax.random.split(layer_keys[k_i], batch_size)
+            x_hat_lnvar = jax.nn.tanh(conv_layer(x_hat_mu, key_batch_lnvar))
+
+        x_hat_mu = x_hat_mu.reshape((batch_size, -1))
+        x_hat_lnvar = x_hat_lnvar.reshape((batch_size, -1))
+
+        key_batch_mu = jax.random.split(layer_keys[k_i], batch_size)
+        k_i += 1
+        x_hat_mu = jax.nn.tanh(self.final_lin_mu(x_hat_mu, key_batch_mu))
+
+        key_batch_lnvar = jax.random.split(layer_keys[k_i], batch_size)
+        k_i += 1
+        x_hat_lnvar = jax.nn.tanh(self.final_lin_mu(x_hat_lnvar, key_batch_lnvar))
 
         return x_hat_mu, x_hat_lnvar
 

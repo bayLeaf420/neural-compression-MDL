@@ -22,6 +22,7 @@ class EncoderConfig:
 @dataclass(frozen=True)
 class DecoderConfig:
     lin: LinConfig
+    conv: ConvConfig
 
 
 @dataclass(frozen=True)
