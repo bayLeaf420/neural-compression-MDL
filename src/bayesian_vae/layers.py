@@ -90,10 +90,12 @@ class BayesianLinear(nnx.Module):
         Returns:
           jax.Array: [batch_size, out_dims]
         """
-        w_mu = self.w_mu
-        w_lnvar = self.w_lnvar
-        b_mu = self.b_mu  # is None if self.use_bias is False
-        b_lnvar = self.b_lnvar
+        w_mu = self.w_mu[...]
+        w_lnvar = self.w_lnvar[...]
+
+        if self.use_bias:
+            b_mu = self.b_mu[...]  # type: ignore
+            b_lnvar = self.b_lnvar[...] # type: ignore
 
         def _single_example_forward(
             key: jax.Array,
@@ -110,15 +112,17 @@ class BayesianLinear(nnx.Module):
             """
             w_key, b_key = jax.random.split(key)
 
-            w_noise = jax.random.normal(w_key, w_mu.shape)
-            w = w_mu + w_noise * jnp.exp(0.5 * w_lnvar)
+            out_mu = x @ w_mu 
+            out_var = x**2 @ jnp.exp(w_lnvar) # We don't need x to be natural log-ged
+            out_noise = jax.random.normal(w_key, out_mu.shape)
 
-            out = x @ w
+            out = out_mu + out_noise * jnp.sqrt(out_var + 1e-8) # 1e-8 to prevent div-by-0 for gradient calc
+
             if self.use_bias:
-                b_noise = jax.random.normal(b_key, b_mu.shape) # type: ignore
-                b = b_mu + b_noise * jnp.exp(0.5 * b_lnvar) # type: ignore
-                out += b
-
+                b_noise = jax.random.normal(b_key, b_mu.shape)
+                b = b_mu + b_noise * jnp.exp(0.5 * b_lnvar)
+                out += b 
+            
             return out
 
         return jax.vmap(_single_example_forward, in_axes=(0, 0))(key_batch, x)
@@ -292,3 +296,5 @@ class BayesianConv2D(nnx.Module):
                 self.prior_lnvar,
             )
         return total_kl
+
+    
