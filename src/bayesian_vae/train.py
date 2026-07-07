@@ -122,9 +122,9 @@ def build_model(key: jax.Array) -> BayesianVAE:
     vae_config = VaeConfig(
         encoder_config=encoder_config,
         decoder_config=decoder_config,
-        z_dim = 45,
-        w_prior_lnvar=0.0,
-        z_free_nats=0.5,
+        z_dim = 100,
+        w_prior_lnvar=1.0,
+        z_free_nats=0.7,
     )
 
     return BayesianVAE(
@@ -251,6 +251,9 @@ def main() -> None:
 
     train_loss_array = []
     val_loss_array = []
+
+    rln2 = 1/jnp.log(2)
+    num_pixels = 28*28
     
     ### ---- Training loop ---- ###
     for epoch in range(NUM_EPOCHS):
@@ -276,9 +279,9 @@ def main() -> None:
                 best_val_loss = avg_val_loss
                 save_if_best(manager, model, epoch, avg_val_loss)
 
-        log_epoch(epoch, loss, aux, avg_val_loss)
+        log_epoch(epoch, loss, aux, (avg_val_loss * rln2)/num_pixels)
         train_loss_array.append(loss)
-        val_loss_array.append(avg_val_loss)
+        val_loss_array.append((avg_val_loss * rln2)/num_pixels)
 
     # Orbax saving is asynchronous, we main() to wait for it to finish saving before returning.
     manager.wait_until_finished() 
