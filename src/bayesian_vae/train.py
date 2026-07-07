@@ -24,7 +24,7 @@ from bayesian_vae.data_mnist import (
 
 
 CHECKPOINT_DIR = os.path.abspath(os.environ.get("CHECKPOINT_DIR", "./checkpoints"))
-NUM_EPOCHS = 50
+NUM_EPOCHS = 120
 BATCH_SIZE = 128
 VALIDATE_EVERY = 5
 MASTER_KEY = 47
@@ -101,17 +101,17 @@ def validation_step(
 def build_model(key: jax.Array) -> BayesianVAE:
     encoder_config = EncoderConfig(
         ConvConfig(
-            kernels=((5, 5), (4, 4), (3, 3), (3, 3), (3, 3)),
-            strides=((1, 1), (2, 2), (2, 2), (2, 2), (2, 2)),
-            channels=(7, 8, 9, 10, 11),
+            kernels=((3, 3), (3, 3), (3, 3), (3, 3)),
+            strides=((1, 1), (2, 2), (2, 2), (2, 2)),
+            channels=(7, 14, 24, 32),
         ),
         LinConfig(
-            hidden_dims=(224, 100, 88, 50),
+            hidden_dims=(443, 223, 100),
         ),
     )
     decoder_config = DecoderConfig(
         LinConfig(
-            hidden_dims=(55, 124, 345, 492, 784),
+            hidden_dims=(200, 300, 400, 784),
         ),
         ConvConfig(
             kernels = ((3, 3), (3, 3),  (3, 3)),

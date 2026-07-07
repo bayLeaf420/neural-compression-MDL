@@ -1,4 +1,4 @@
-"""Unit tests for models.py — run with: pytest tests/models_test.py -v"""
+"""Unit tests for models.py — run with: pytest ./src/bayesian_vae/tests/test_models.py -v"""
 import jax
 import jax.numpy as jnp
 import flax.nnx as nnx
@@ -31,7 +31,16 @@ def _tiny_encoder_config():
 
 
 def _tiny_decoder_config():
-    return DecoderConfig(LinConfig(hidden_dims=(16, 32)))
+    return DecoderConfig(
+        LinConfig(
+            hidden_dims=(32, 12),
+        ),
+        ConvConfig(
+            kernels=((3, 3), (3, 3)),
+            strides=((1, 1), (1, 1)),
+            channels=(2, 2),
+        )
+    )
 
 
 def _tiny_vae_config():

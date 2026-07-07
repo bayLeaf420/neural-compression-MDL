@@ -268,11 +268,11 @@ class BayesianDecoder(nnx.Module):
                 f"too much downsampling for input {output_shape}."
             )
 
-        flat_dim = int(jnp.prod(conv_shape[1:]))  # drop batch dim
+        flat_dim_eval = int(jnp.prod(conv_shape[1:]))  # drop batch dim
 
         # ---- Final linear ---- 
-        self.final_lin_mu = BayesianLinear(flat_dim, flat_dim, prior_lnvar=prior_lnvar, rngs=rngs)
-        self.final_lin_lnvar = BayesianLinear(flat_dim, flat_dim, prior_lnvar=prior_lnvar, rngs=rngs)
+        self.final_lin_mu = BayesianLinear(flat_dim_eval, flat_dim, prior_lnvar=prior_lnvar, rngs=rngs)
+        self.final_lin_lnvar = BayesianLinear(flat_dim_eval, flat_dim, prior_lnvar=prior_lnvar, rngs=rngs)
 
 
     def __call__(self, z: jax.Array, key: jax.Array) -> tuple[jax.Array, jax.Array]:
@@ -319,18 +319,21 @@ class BayesianDecoder(nnx.Module):
             x_hat_mu = jax.nn.tanh(conv_layer(x_hat_mu, key_batch_mu))
             k_i += 1
             key_batch_lnvar = jax.random.split(layer_keys[k_i], batch_size)
-            x_hat_lnvar = jax.nn.tanh(conv_layer(x_hat_mu, key_batch_lnvar))
+            x_hat_lnvar = jax.nn.tanh(conv_layer(x_hat_lnvar, key_batch_lnvar))
 
         x_hat_mu = x_hat_mu.reshape((batch_size, -1))
         x_hat_lnvar = x_hat_lnvar.reshape((batch_size, -1))
 
         key_batch_mu = jax.random.split(layer_keys[k_i], batch_size)
         k_i += 1
-        x_hat_mu = jax.nn.tanh(self.final_lin_mu(x_hat_mu, key_batch_mu))
+        x_hat_mu = self.final_lin_mu(x_hat_mu, key_batch_mu)
 
         key_batch_lnvar = jax.random.split(layer_keys[k_i], batch_size)
         k_i += 1
-        x_hat_lnvar = jax.nn.tanh(self.final_lin_mu(x_hat_lnvar, key_batch_lnvar))
+        x_hat_lnvar = self.final_lin_lnvar(x_hat_lnvar, key_batch_lnvar)
+
+        x_hat_mu = x_hat_mu.reshape(batch_size, *self.output_shape)
+        x_hat_lnvar = x_hat_lnvar.reshape(batch_size, *self.output_shape)
 
         return x_hat_mu, x_hat_lnvar
 
@@ -341,6 +344,11 @@ class BayesianDecoder(nnx.Module):
             total_kl += lin_layer.calculate_kl_divergence()
         total_kl += self.lin_last_mean.calculate_kl_divergence()
         total_kl += self.lin_last_lnvar.calculate_kl_divergence()
+        for conv_layer in self.conv_layers:
+            total_kl += conv_layer.calculate_kl_divergence()
+        total_kl += self.final_lin_mu.calculate_kl_divergence()
+        total_kl += self.final_lin_lnvar.calculate_kl_divergence()
+
         return total_kl
 
 
@@ -429,6 +437,7 @@ class BayesianVAE(nnx.Module):
             z_key_batch, z_mu, z_lnvar
         )
         x_hat_mu, x_hat_lnvar = self.decoder(z, dec_key)
+
         return x_hat_mu, x_hat_lnvar, z_mu, z_lnvar, z
 
     def calculate_latent_kl_divergence(self, z_mu, z_lnvar):
