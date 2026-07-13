@@ -5,11 +5,12 @@ import optax
 import orbax.checkpoint as ocp
 import matplotlib.pyplot as plt
 
+import os 
+
 from bayesian_vae.train import (
     BATCH_SIZE,
     VALIDATE_EVERY,
     build_model,
-    build_checkpoint_manager,
     save_if_best,
     run_validation,
     train_one_epoch,
@@ -24,8 +25,20 @@ from bayesian_vae.data_mnist import (
 from bayesian_vae.models import PriorParam
 
 # Redefine NUM_EPOCHS and MASTER_KEY
-NUM_EPOCHS = 400
-MASTER_KEY = 56
+NUM_EPOCHS = 100
+MASTER_KEY = 78
+CHECKPOINT_DIR = os.path.abspath(os.environ.get("CHECKPOINT_DIR_CONT", "./checkpoints"))
+
+
+def build_checkpoint_manager() -> ocp.CheckpointManager:
+    options = ocp.CheckpointManagerOptions(
+        max_to_keep=3,
+        best_fn=lambda metrics: metrics["validation_loss"],
+        best_mode="min",
+    )
+
+    return ocp.CheckpointManager(CHECKPOINT_DIR, options=options)
+
 
 def main() -> None:
     key = jax.random.key(MASTER_KEY)
