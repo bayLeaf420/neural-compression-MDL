@@ -27,17 +27,18 @@ from bayesian_vae.models import PriorParam
 # Redefine NUM_EPOCHS and MASTER_KEY
 NUM_EPOCHS = 100
 MASTER_KEY = 78
-CHECKPOINT_DIR = os.path.abspath(os.environ.get("CHECKPOINT_DIR_CONT", "./checkpoints"))
+CHECKPOINT_DIR_OLD = os.path.abspath(os.environ.get("CHECKPOINT_DIR", "./checkpoints"))
+CHECKPOINT_DIR_NEW = os.path.abspath(os.environ.get('CHECKPOINT_DIR_NEW', './checkpoints'))
 
 
-def build_checkpoint_manager() -> ocp.CheckpointManager:
+def build_checkpoint_manager(path) -> ocp.CheckpointManager:
     options = ocp.CheckpointManagerOptions(
         max_to_keep=3,
         best_fn=lambda metrics: metrics["validation_loss"],
         best_mode="min",
     )
 
-    return ocp.CheckpointManager(CHECKPOINT_DIR, options=options)
+    return ocp.CheckpointManager(path, options=options)
 
 
 def main() -> None:
@@ -53,9 +54,9 @@ def main() -> None:
     model = build_model(jax.random.key(0))
     abstract_state = nnx.state(model, (nnx.Param, PriorParam))
     
-    manager = build_checkpoint_manager()
-    step = manager.latest_step()
-    restored = manager.restore(step, args=ocp.args.StandardRestore(abstract_state))
+    old_manager = build_checkpoint_manager(CHECKPOINT_DIR_OLD)
+    step = old_manager.latest_step()
+    restored = old_manager.restore(step, args=ocp.args.StandardRestore(abstract_state))
 
     nnx.update(model, restored)
 
@@ -67,6 +68,9 @@ def main() -> None:
     val_loss_array = []
     ln2 = jnp.log(2)
     num_pix = float(28*28)
+
+    ### ---- New manager for checkpointing ---- #### 
+    new_manager = build_checkpoint_manager(CHECKPOINT_DIR_NEW)
     
     ### ---- Training loop ---- ###
     for epoch in range(NUM_EPOCHS):
@@ -90,14 +94,14 @@ def main() -> None:
             )
             if avg_val_loss < best_val_loss:
                 best_val_loss = avg_val_loss
-                save_if_best(manager, model, epoch, avg_val_loss)
+                save_if_best(new_manager, model, epoch, avg_val_loss)
 
         log_epoch(epoch, loss, aux, avg_val_loss)
         train_loss_array.append(loss)
         val_loss_array.append(avg_val_loss/(ln2 * num_pix))
 
     # Orbax saving is asynchronous, we main() to wait for it to finish saving before returning.
-    manager.wait_until_finished() 
+    new_manager.wait_until_finished() 
 
     # ---- Plot training graphs ----
     val_loss_array = jnp.asarray(val_loss_array)
