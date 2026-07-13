@@ -531,6 +531,7 @@ dependencies = [
     { name = "numpy" },
     { name = "optax" },
     { name = "orbax-checkpoint" },
+    { name = "qwix" },
 ]
 
 [package.dev-dependencies]
@@ -547,6 +548,7 @@ requires-dist = [
     { name = "numpy", specifier = ">=2.5.1" },
     { name = "optax", specifier = "==0.2.8" },
     { name = "orbax-checkpoint", specifier = "==0.12.1" },
+    { name = "qwix", specifier = "==0.1.8" },
 ]
 
 [package.metadata.requires-dev]
@@ -888,6 +890,23 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/da/92/1446574745d74df0c92e6aa4a7b0b3130706a4142b2d1a5869f2eaa423c6/pyyaml-6.0.3-cp314-cp314t-musllinux_1_2_x86_64.whl", hash = "sha256:16249ee61e95f858e83976573de0f5b2893b3677ba71c9dd36b9cf8be9ac6d65", size = 829923, upload-time = "2025-09-25T21:32:54.537Z" },
     { url = "https://files.pythonhosted.org/packages/f0/7a/1c7270340330e575b92f397352af856a8c06f230aa3e76f86b39d01b416a/pyyaml-6.0.3-cp314-cp314t-win_amd64.whl", hash = "sha256:4ad1906908f2f5ae4e5a8ddfce73c320c2a1429ec52eafd27138b7f1cbe341c9", size = 174062, upload-time = "2025-09-25T21:32:55.767Z" },
     { url = "https://files.pythonhosted.org/packages/f1/12/de94a39c2ef588c7e6455cfbe7343d3b2dc9d6b6b2f40c4c6565744c873d/pyyaml-6.0.3-cp314-cp314t-win_arm64.whl", hash = "sha256:ebc55a14a21cb14062aa4162f906cd962b28e2e9ea38f9b4391244cd8de4ae0b", size = 149341, upload-time = "2025-09-25T21:32:56.828Z" },
+]
+
+[[package]]
+name = "qwix"
+version = "0.1.8"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "absl-py" },
+    { name = "flax" },
+    { name = "jax" },
+    { name = "jaxlib" },
+    { name = "numpy" },
+    { name = "opt-einsum" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/bd/3e/248fb12be72fbc41ed2abb32bccd35c0458da11fdd4939d2f4a7afd65e23/qwix-0.1.8.tar.gz", hash = "sha256:12e4fb40575ff0a1c4aa82ba0f682299d47e762c7e80108708081e6ebd67a32a", size = 131544, upload-time = "2026-06-22T20:13:13.335Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/1a/a1/8b1efafe98c06e58ac88ef12f9fc2d20badcc028d150b51f71f2cd5247a3/qwix-0.1.8-py3-none-any.whl", hash = "sha256:0f4686f7f10a1168787fac4fbaf4d9883bcb8f78a01f2ff1cd3834d39f859b12", size = 168088, upload-time = "2026-06-22T20:13:11.925Z" },
 ]
 
 [[package]]

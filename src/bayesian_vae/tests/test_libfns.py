@@ -15,6 +15,21 @@ def eval_shape():
 
     print(f"out_shape: {out.shape}\ndtype of out.shape: {jnp.asarray(out.shape)}")
 
+def test_stateful_comp():
+    class Counter:
+        def __init__(self):
+            self.counter = jnp.asarray(0)
+        @jax.jit
+        def count(self):
+            self.counter += 1
+            return self.counter
+        def reset(self):
+            self.counter = 0
+    
+    counter = Counter()
+    for _ in range(3):
+        print(counter.count())
 
 if __name__=="__main__":
-    eval_shape()
+    # eval_shape()
+    test_stateful_comp()

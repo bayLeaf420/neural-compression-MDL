@@ -6,18 +6,18 @@ import flax.nnx as nnx
 def _gaussian_kl_divergence(
     post_mu: jax.Array,
     post_lnvar: jax.Array,
-    prior_mu: jax.Array,
-    prior_lnvar: jax.Array,
+    prior_mu: jax.Array | float,
+    prior_lnvar: jax.Array | float,
 ) -> jax.Array:
     """
     Helper function to calculate KL-divergence of gaussian posterior with respect to prior. The
     posterior is the 'approximating' distribution and the prior is the assumed 'true' distribution.
 
     Args:
-      post_mean: Input array of shape (L,) for some L.
-      post_lnvar: Input array of shape (L,), representing the natural log of diagonal of posterior
-        covariance matrix. It can be (1,) shape as well, boradcasting will handle.
-      prior_lnvar: Input array of shape (L,), represents prior log, jax.numpy handles broadcasting 
+      post_mean: Input array of any shape
+      post_lnvar: Input array of anyshape, representing the natural log of diagonal of posterior
+        covariance tensor. It can be (1,) shape as well, boradcasting will handle.
+      prior_lnvar: Input array of any shape, represents prior log, jax.numpy handles broadcasting 
         it for calculation. It can be (1,) shape as well, boradcasting will handle.
 
     Returns:
@@ -25,7 +25,7 @@ def _gaussian_kl_divergence(
     """
     elementwise_kl = 0.5 * (prior_lnvar - post_lnvar + jnp.exp(post_lnvar - prior_lnvar)
                             + jnp.exp(-prior_lnvar) * (post_mu - prior_mu)**2) - 0.5
-    return jnp.sum(elementwise_kl)
+    return jnp.sum(elementwise_kl) #  sum along all axes
 
 
 class BayesianLinear(nnx.Module):
@@ -212,7 +212,7 @@ class BayesianConv2D(nnx.Module):
         )
         bias_shape = (out_channels,)
 
-        self.kernel_mean = nnx.Param(
+        self.kernel_mu = nnx.Param(
             jax.random.normal(rngs.params(), kernel_shape) * 0.05
         )
         self.kernel_lnvar = nnx.Param(jnp.full(kernel_shape, -5.0))
@@ -238,7 +238,7 @@ class BayesianConv2D(nnx.Module):
         Returns:
           jax.Array: [batch_size, height_out, width_out, out_channels], output of convolution.
         """
-        kernel_mean = self.kernel_mean
+        kernel_mu = self.kernel_mu
         kernel_lnvar = self.kernel_lnvar
         b_mu = self.b_mu  # If use_bias = False, is None
         b_lnvar = self.b_lnvar
@@ -253,9 +253,9 @@ class BayesianConv2D(nnx.Module):
               jax.Array: [height_out, width_out, out_channels]
             """
             kernel_noise_key, b_key = jax.random.split(key)
-            w_noise = jax.random.normal(kernel_noise_key, kernel_mean.shape)
+            w_noise = jax.random.normal(kernel_noise_key, kernel_mu.shape)
 
-            w = kernel_mean + w_noise * jnp.exp(0.5 * kernel_lnvar)
+            w = kernel_mu + w_noise * jnp.exp(0.5 * kernel_lnvar)
 
             # Expand to include batch dimension as that is needed by conv_general_dilated
             x = x[jnp.newaxis, ...]  # [1, H, W, C_in]
@@ -283,7 +283,7 @@ class BayesianConv2D(nnx.Module):
     def calculate_kl_divergence(self) -> jax.Array:
         """Calculate KL divergence of weight distribution w.r.t. prior distribution."""
         total_kl = _gaussian_kl_divergence(
-            self.kernel_mean[...],
+            self.kernel_mu[...],
             self.kernel_lnvar[...],
             jnp.array(0.0),
             self.prior_lnvar,

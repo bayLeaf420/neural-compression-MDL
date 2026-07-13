@@ -13,20 +13,47 @@ class LossAux:
     weight_kl_divergence: jax.Array
 
 
-def erf_reconstruction_loss(mean, lnvar, target, num_bins=256):
-    lnvar = jnp.clip(lnvar, -25.0, 25.0) # Prevent lnvar from going to useless values.
-    std = jnp.exp(0.5 * lnvar)
-    half_bin = 0.5 / (num_bins - 1)      # half the bin width, on [0,1] scale
-    # standardized upper/lower bin edges
-    upper = (target + half_bin - mean) / std
-    lower = (target - half_bin - mean) / std
-    # normal CDF via erf
-    def cdf(z):
-        return 0.5 * (1.0 + jax.lax.erf(z / jnp.sqrt(2.0)))
-    prob = cdf(upper) - cdf(lower)                 # probability mass in the bin
-    prob = jnp.clip(prob, 1e-12, 1.0)              # avoid log(0)
-    nll = -jnp.log(prob)                           # non-negative, in NATS
-    return jnp.mean(jnp.sum(nll, axis=(1, 2, 3))) # [B, H, W, C]
+def erf_reconstruction_loss(mean, lnvar, target, bin_width: float=1/255):
+    """Discretized-Gaussian NLL (nats) per image, summed over pixels.
+
+    Computes log(Phi(upper) - Phi(lower)) in a numerically stable way:
+    log_ndtr avoids CDF underflow in the tails, and the log1mexp-style
+    difference avoids catastrophic cancellation when the two edges are
+    close or both deep in a tail.
+    """
+    lnvar = jnp.clip(lnvar, -25.0, 25.0)
+    inv_std = jnp.exp(-0.5 * lnvar)                 # 1/std, one exp, no divides
+    half_bin = 0.5 * bin_width 
+    # standardized bin edges (lower < upper)
+    lower = (target - half_bin - mean) * inv_std
+    upper = (target + half_bin - mean) * inv_std
+
+    # Reflect into the left tail when the bin sits in the right tail,
+    # so both log_ndtr evaluations run where they're most accurate.
+    # Phi(u) - Phi(l) == Phi(-l) - Phi(-u), so swap+negate when l+u > 0.
+    flip = (lower + upper) > 0.0
+    a = jnp.where(flip, -upper, lower)              # smaller edge
+    b = jnp.where(flip, -lower, upper)              # larger edge  (b >= a)
+
+    log_cdf_a = jax.scipy.special.log_ndtr(a)                         # log Phi(a)
+    log_cdf_b = jax.scipy.special.log_ndtr(b)                         # log Phi(b),  >= log_cdf_a
+
+    # log(Phi(b) - Phi(a)) = log_cdf_b + log1mexp(log_cdf_a - log_cdf_b)
+    delta = log_cdf_a - log_cdf_b                   # <= 0
+    log_prob = log_cdf_b + _log1mexp(delta)
+
+    nll = -log_prob                                 # nats, non-negative
+    return jnp.mean(jnp.sum(nll, axis=(1, 2, 3)))   # [B, H, W, C]
+
+
+def _log1mexp(x):
+    """Stable log(1 - exp(x)) for x <= 0 (Mächler's two-branch form)."""
+    # near 0: log(-expm1(x));  more negative: log1p(-exp(x))
+    return jnp.where(
+        x > -jnp.log(2.0),
+        jnp.log(-jnp.expm1(x)),
+        jnp.log1p(-jnp.exp(x)),
+    )
 
 
 def compute_training_loss(

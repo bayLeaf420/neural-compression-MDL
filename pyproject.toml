@@ -11,6 +11,7 @@ dependencies = [
     "numpy>=2.5.1",
     "optax==0.2.8",
     "orbax-checkpoint==0.12.1",
+    "qwix==0.1.8",
 ]
 
 [build-system]

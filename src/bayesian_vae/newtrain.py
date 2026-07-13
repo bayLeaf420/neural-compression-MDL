@@ -5,15 +5,14 @@ import optax
 import orbax.checkpoint as ocp
 import os
 import matplotlib.pyplot as plt
+import pandas as pd
 
-from bayesian_vae.models import BayesianVAE
-from bayesian_vae.losses import (
+from bayesian_vae.newmodel import BayesVAE
+from bayesian_vae.newlosses import (
     compute_training_loss,
     compute_validation_reconstruction_loss,
     LossAux,
 )
-from bayesian_vae.config import EncoderConfig, DecoderConfig, ConvConfig, LinConfig, VaeConfig
-from bayesian_vae.utils import PostLog, PriorParam
 
 from bayesian_vae.data_mnist import (
     load_mnist_train_images,
@@ -27,111 +26,46 @@ CHECKPOINT_DIR = os.path.abspath(os.environ.get("CHECKPOINT_DIR", "./checkpoints
 NUM_EPOCHS = 120
 BATCH_SIZE = 128
 VALIDATE_EVERY = 5
-MASTER_KEY = 89
-
-def prior_train_step_ema(
-        z_prior_mu: jax.Array, z_prior_lnvar: jax.Array,
-        z_mu: jax.Array, z_lnvar: jax.Array, 
-        decay: float,
-        ) -> tuple[jax.Array, jax.Array]:
-    """Seperate update rule for PriorParam. We run this after running
-
-    Args: 
-        z_prior_mu: Current prior mean
-        z_prior_lnvar: Current prior natural log-variance
-        z_mu: Posterior mean of latent
-        z_lnvar: Posterior lnvar of latent
-        decay: -->1 ==> Slower updates to prior.
-    """
-    # aggregate posterior over the batch
-    batch_mu = jnp.mean(z_mu, axis=0)                    # [z_dim]
-    batch_var = jnp.mean(jnp.exp(z_lnvar) + z_mu**2, axis=0) - batch_mu**2
-    
-    new_z_mu = decay * z_prior_mu + (1 - decay) * batch_mu
-
-    new_z_var = decay * jnp.exp(z_prior_lnvar) + (1 - decay) * batch_var
-    new_z_var = jnp.maximum(new_z_var, 1e-6)   # guarantee positivity, JIT-safe
-    new_z_lnvar = jnp.log(new_z_var)
-
-    return new_z_mu, new_z_lnvar
+MASTER_KEY = 99
 
 
-@nnx.jit(static_argnames=('decay',))  # JIT compile this thing
+@nnx.jit(static_argnames=('mode',))  # JIT compile this thing
 def train_step(
-    model: BayesianVAE,
+    model: BayesVAE,
     optimizer: nnx.Optimizer,
     input_batch: jax.Array,
     step_key: jax.Array,
     kl_weight_scale: jax.Array,
-    decay: float,
-) -> tuple[jax.Array, LossAux, PostLog]:
+    mode='train',
+) -> tuple[jax.Array, LossAux]:
     """
     """
 
-    def loss_fn(model: BayesianVAE) -> tuple[jax.Array, tuple[LossAux, PostLog]]:
-        loss, aux, post_log = compute_training_loss(model, input_batch, step_key, kl_weight_scale)
-        return loss, (aux, post_log)
+    def loss_fn(model: BayesVAE) -> tuple[jax.Array, LossAux]:
+        loss, aux = compute_training_loss(model, input_batch, step_key, kl_weight_scale, mode=mode)
+        return loss, aux
 
     grad_fn = nnx.value_and_grad(loss_fn, has_aux=True)
-    (loss, (aux, post_log)), grad = grad_fn(model)
+    (loss, aux), grad = grad_fn(model)
 
     # Update 'model''s params and 'optimizer''s opt_state in place
     optimizer.update(model, grad)
 
-    # Update model's prior
-    model.z_prior_mu[...], model.z_prior_lnvar[...] = prior_train_step_ema(
-        model.z_prior_mu[...], 
-        model.z_prior_lnvar[...],
-        post_log.z_mu,
-        post_log.z_lnvar,
-        decay,
-    )
-    return loss, aux, post_log
+    return loss, aux
 
 
-@nnx.jit
+@nnx.jit(static_argnames=('test',))
 def validation_step(
-    model: BayesianVAE,
+    model: BayesVAE,
     input_batch: jax.Array,
     step_key: jax.Array,
+    mode='test',
 ) -> jax.Array:
-    return compute_validation_reconstruction_loss(model, input_batch, step_key)
+    return compute_validation_reconstruction_loss(model, input_batch, step_key, mode=mode)
 
 
-def build_model(key: jax.Array) -> BayesianVAE:
-    encoder_config = EncoderConfig(
-        ConvConfig(
-            kernels=((3, 3), (3, 3), (3, 3), (3, 3)),
-            strides=((1, 1), (2, 2), (2, 2), (2, 2)),
-            channels=(7, 14, 24, 32),
-        ),
-        LinConfig(
-            hidden_dims=(443, 223, 100),
-        ),
-    )
-    decoder_config = DecoderConfig(
-        LinConfig(
-            hidden_dims=(200, 300, 400, 784),
-        ),
-        ConvConfig(
-            kernels = ((3, 3), (3, 3),  (3, 3)),
-            strides=((1, 1), (1, 1), (1, 1)),
-            channels = ((5, 5, 5, 5)),
-        )
-    )
-    vae_config = VaeConfig(
-        encoder_config=encoder_config,
-        decoder_config=decoder_config,
-        z_dim = 100,
-        w_prior_lnvar=1.0,
-        z_free_nats=0.7,
-    )
-
-    return BayesianVAE(
-        in_shape=(28, 28, 1),
-        config=vae_config,
-        rngs=nnx.Rngs(key),
-    )
+def build_model(key: jax.Array) -> BayesVAE:
+    return BayesVAE(rngs=nnx.Rngs(key))
 
 
 def build_checkpoint_manager() -> ocp.CheckpointManager:
@@ -146,7 +80,7 @@ def build_checkpoint_manager() -> ocp.CheckpointManager:
 
 def save_if_best(
     manager: ocp.CheckpointManager,
-    model: BayesianVAE,
+    model: BayesVAE,
     epoch: int,
     val_loss: jax.Array,
 ) -> None:
@@ -155,7 +89,7 @@ def save_if_best(
     Args:
 
     """
-    params = nnx.state(model, (nnx.Param, PriorParam))
+    params = nnx.state(model, nnx.Param)
     manager.save(
         epoch,
         args=ocp.args.StandardSave(params),
@@ -166,7 +100,7 @@ def save_if_best(
 
 
 def run_validation(
-    model: BayesianVAE,
+    model: BayesVAE,
     validation_images: jax.Array,
     batch_size: int,
     master_key: jax.Array,
@@ -182,7 +116,7 @@ def run_validation(
 
 
 def train_one_epoch(
-    model: BayesianVAE,
+    model: BayesVAE,
     optimizer: nnx.Optimizer,
     train_images: jax.Array,
     kl_weight_scale: jax.Array,
@@ -195,22 +129,19 @@ def train_one_epoch(
     loss = jnp.asarray(0.0)
     aux = None
     batches = train_images.shape[0] // batch_size
-    decay = float(1 - 1 / batches)
     
     for image_batch in iterate_shuffled_batches(
         train_images, shuffle_key, batch_size, batches
     ):
         key, step_key = jax.random.split(key)
-        loss, aux, post_log = train_step(
+        loss, aux = train_step(
             model,
             optimizer,
             image_batch,
             step_key,
             kl_weight_scale,
-            decay,
         )
-        if float(jnp.max(post_log.z_lnvar)) > 15.0:   # Detect unstable training
-            print(f"WARNING: z_lnvar max ... at epoch {epoch}")
+        
     assert aux is not None  # at least one batch ran
     return loss, aux, key
 
@@ -287,12 +218,13 @@ def main() -> None:
     manager.wait_until_finished() 
 
     # ---- Plot training graphs ----
+    clean_val = pd.Series(val_loss_array).interpolate(method='linear').to_numpy()
     epoch_range = jnp.arange(0, NUM_EPOCHS)
     fig, axes = plt.subplots(2, 1, figsize=(6, 8))
     axes[0].plot(epoch_range, jnp.asarray(train_loss_array))
     axes[0].set_xlabel('epochs')
     axes[0].set_ylabel('Training loss (Nats)')
-    axes[1].plot(epoch_range, jnp.asarray(val_loss_array))
+    axes[1].plot(epoch_range, jnp.asarray(clean_val))
     axes[1].set_xlabel('epochs')
     axes[1].set_ylabel('Validation loss (Nats)')
     plt.tight_layout()
