@@ -54,7 +54,7 @@ def train_step(
     return loss, aux
 
 
-@nnx.jit(static_argnames=('test',))
+@nnx.jit(static_argnames=('mode',))
 def validation_step(
     model: BayesVAE,
     input_batch: jax.Array,
