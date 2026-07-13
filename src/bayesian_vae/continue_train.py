@@ -65,6 +65,8 @@ def main() -> None:
 
     train_loss_array = []
     val_loss_array = []
+    ln2 = jnp.log(2)
+    num_pix = float(28*28)
     
     ### ---- Training loop ---- ###
     for epoch in range(NUM_EPOCHS):
@@ -92,20 +94,22 @@ def main() -> None:
 
         log_epoch(epoch, loss, aux, avg_val_loss)
         train_loss_array.append(loss)
-        val_loss_array.append(avg_val_loss)
+        val_loss_array.append(avg_val_loss/(ln2 * num_pix))
 
     # Orbax saving is asynchronous, we main() to wait for it to finish saving before returning.
     manager.wait_until_finished() 
 
     # ---- Plot training graphs ----
+    val_loss_array = jnp.asarray(val_loss_array)
+    clean_val = jnp.where(jnp.isnan(val_loss_array), 0.0, val_loss_array)
     epoch_range = jnp.arange(0, NUM_EPOCHS)
     fig, axes = plt.subplots(2, 1, figsize=(6, 8))
     axes[0].plot(epoch_range, jnp.asarray(train_loss_array))
     axes[0].set_xlabel('epochs')
     axes[0].set_ylabel('Training loss (Nats)')
-    axes[1].plot(epoch_range, jnp.asarray(val_loss_array))
+    axes[1].plot(epoch_range, clean_val)
     axes[1].set_xlabel('epochs')
-    axes[1].set_ylabel('Validation loss (Nats)')
+    axes[1].set_ylabel('Validation loss (Bits per dim)')
     plt.tight_layout()
     plt.show()
     
