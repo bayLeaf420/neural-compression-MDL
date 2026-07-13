@@ -1,150 +1,190 @@
 import jax
-from flax import nnx
 import jax.numpy as jnp
-import qwix 
+from flax import nnx
 
-from bayesian_vae.layers import BayesianLinear, BayesianConv2D 
-from bayesian_vae.losses import erf_reconstruction_loss 
 
 class QScale(nnx.Variable): pass
-class QZeroPoint(nnx.Variable): pass 
-class OverParam(nnx.Param): pass # overfitting w.r.t. OverParam
+class QZeroPoint(nnx.Variable): pass
+class OverParam(nnx.Param): pass
 
 
-def fake_quant(input, scale, zero_point, qmin, qmax):
-    """Asymmetric per-tensor fake-quant with straight-through estimator."""
-    q = jnp.clip(jnp.round(input / scale) + zero_point, qmin, qmax)
-    input_hat = (q - zero_point) * scale
-    return input + jax.lax.stop_gradient(input_hat - input)   # <-- STE: grad flows as identity
+def fake_quant(x, scale, zero_point, qmin, qmax):
+    """Asymmetric per-tensor fake-quant with STE. Scale/zero are treated as
+    CONSTANTS w.r.t. gradients (correct QAT semantics — the quant grid is
+    calibrated, not learned)."""
+    scale = jax.lax.stop_gradient(scale)
+    zero_point = jax.lax.stop_gradient(zero_point)
+    q = jnp.clip(jnp.round(x / scale) + zero_point, qmin, qmax)
+    x_hat = (q - zero_point) * scale
+    return x + jax.lax.stop_gradient(x_hat - x)
 
 
-def _scaled_erf(mean, lnvar, over_w, scale, zero_point, qmin, qmax):
-    targ = fake_quant(over_w, scale, zero_point, qmin, qmax)
-    return erf_reconstruction_loss(mean, lnvar, targ, bin_width=scale)
+def _calibrate_tensor(w, qmin, qmax):
+    w_min, w_max = jnp.min(w), jnp.max(w)
+    scale = jnp.maximum((w_max - w_min) / (qmax - qmin), 1e-8)
+    zero = jnp.round(qmin - w_min / scale)
+    return scale, zero
 
 
-class OverLin(BayesianLinear):
-    """Uses mean of weight distribution for forward pass only.
+def _log1mexp(x):
+    """Stable log(1 - exp(x)) for x <= 0."""
+    return jnp.where(
+        x > -jnp.log(2.0),
+        jnp.log(-jnp.expm1(x)),
+        jnp.log1p(-jnp.exp(x)),
+    )
+
+
+def weight_coding_nll(mean, lnvar, over_w, scale, zero_point, qmin, qmax):
+    """Absolute bits (nats) to code the fake-quantized `over_w` under the frozen
+    base distribution N(mean, exp(lnvar)), SUMMED over ALL weight elements.
+
+    Works for ANY tensor shape (2D linear, 4D conv) — unlike the image-shaped
+    erf_reconstruction_loss which hardcodes axis=(1,2,3) and a batch-mean.
+    Uses the quant grid's true range as the boundary-bin edges, in weight units.
     """
-    def __init__(self, in_dims, out_dims, bits=8, *, rngs: nnx.Rngs):
-        """
-        Initialize overfitter layer with QAT.
-        """
-        super().__init__(in_dims, out_dims, rngs=rngs)
-        self.over_w = OverParam(self.w_mu[...]) # overfitting w.r.t. OverParam
-        self.qmin = -(2 ** (bits - 1)) # -128
-        self.qmax = (2 ** (bits-1)) - 1 # 127
-        # per tensor: scalar scale + scalar zero point for whole tensor
+    targ = fake_quant(over_w, scale, zero_point, qmin, qmax)
+
+    lnvar = jnp.clip(lnvar, -25.0, 25.0)
+    inv_std = jnp.exp(-0.5 * lnvar)
+    half_bin = 0.5 * scale
+
+    # boundary edges in WEIGHT units (not [0,1])
+    low_edge = (qmin - zero_point) * scale
+    high_edge = (qmax - zero_point) * scale
+
+    lower = (targ - half_bin - mean) * inv_std
+    upper = (targ + half_bin - mean) * inv_std
+
+    # interior: stable log(Phi(upper) - Phi(lower))
+    flip = (lower + upper) > 0.0
+    a = jnp.where(flip, -upper, lower)
+    b = jnp.where(flip, -lower, upper)
+    log_cdf_a = jax.scipy.special.log_ndtr(a)
+    log_cdf_b = jax.scipy.special.log_ndtr(b)
+    log_prob_interior = log_cdf_b + _log1mexp(log_cdf_a - log_cdf_b)
+
+    # boundary bins (mass to +/- inf)
+    log_prob_low = jax.scipy.special.log_ndtr(upper)
+    log_prob_high = jax.scipy.special.log_ndtr(-lower)
+
+    at_low = targ <= low_edge + half_bin
+    at_high = targ >= high_edge - half_bin
+    log_prob = jnp.where(
+        at_low, log_prob_low,
+        jnp.where(at_high, log_prob_high, log_prob_interior),
+    )
+    # SUM over every element — absolute bit count for this whole tensor
+    return -jnp.sum(log_prob)
+
+
+class OverLin(nnx.Module):
+    def __init__(self, base, bits: int = 8):
+        self.in_dims = base.in_dims
+        self.out_dims = base.out_dims
+        self.use_bias = base.use_bias
+        self.qmin = -(2 ** (bits - 1))
+        self.qmax = (2 ** (bits - 1)) - 1
+
+        self.over_w = OverParam(base.w_mu[...])
+        self.w_mu_base = base.w_mu[...]
+        self.w_lnvar_base = base.w_lnvar[...]
         self.w_scale = QScale(jnp.asarray(1.0))
-        self.w_zero = QScale(jnp.asarray(0.0))
+        self.w_zero = QZeroPoint(jnp.asarray(0.0))
+
         if self.use_bias:
-            self.over_b = OverParam(self.b_mu[...]) # type: ignore
+            self.over_b = OverParam(base.b_mu[...])
+            self.b_mu_base = base.b_mu[...]
+            self.b_lnvar_base = base.b_lnvar[...]
             self.b_scale = QScale(jnp.asarray(1.0))
-            self.b_zero = QScale(jnp.asarray(0.0))
+            self.b_zero = QZeroPoint(jnp.asarray(0.0))
 
-        
     def calibrate(self):
-        """
-        Refresh per-tensor scale/zero from current weights. 
-        Call each step.
-        """
-        w = self.over_w[...]
-        w_min, w_max = jnp.min(w), jnp.max(w)
-        w_scale = jnp.maximum((w_max - w_min) / (self.qmax - self.qmin), 1e-8)
-        self.w_scale[...] = w_scale
-        self.w_zero[...] = jnp.round(self.qmin - w_min / w_scale)
-
+        s, z = _calibrate_tensor(self.over_w[...], self.qmin, self.qmax)
+        self.w_scale[...], self.w_zero[...] = s, z
         if self.use_bias:
-            b = self.over_b[...] # type: ignore
-            b_min, b_max = jnp.min(b), jnp.max(b)
-            b_scale = jnp.maximum((b_max - b_min) / (self.qmax - self.qmin), 1e-8)
-            self.b_scale[...] = b_scale 
-            self.b_zero[...] = jnp.round(self.qmin - b_min / b_scale)
-    
-    def calculate_sampling_nll(self):
-        """Calculate reconstruction loss based on initial distribution"""
-        prior_mu = self.w_mu[...]
-        prior_lnvar = self.w_lnvar[...]
+            s, z = _calibrate_tensor(self.over_b[...], self.qmin, self.qmax)
+            self.b_scale[...], self.b_zero[...] = s, z
 
-        
-    def __call__(
-        self,
-        x: jax.Array, # [B, d_in]
-    ) -> jax.Array:
-        """
-        Overfitter layer custom forward pass. Take the mean to avoid 
-        having to do 
-        """
-        w = self.over_w[...] # [d_in, d_out]
-        w = fake_quant(w, self.w_scale, self.w_zero, self.qmin, self.qmax)
-        out = x @ w # out is [B, d_out]
-        if self.use_bias:
-            b = self.over_b[...] # type: ignore
-            b = fake_quant(b, self.b_scale, self.b_zero, self.qmin, self.qmax)
-            out += b # type: ignore
-        return out 
-    
-        
-class OverConv(BayesianConv2D):
-    def __init__(self, in_channels, out_channels, kernel_size, strides: tuple[int, int] | None=None, bits=8, *, rngs: nnx.Rngs):
-        super().__init__(in_channels, out_channels, kernel_size, strides=strides, rngs=rngs) # type: ignore
-        self.over_kernel = OverParam(self.kernel_mu[...])
-        self.qmin = -(2 ** (bits - 1)) # -128
-        self.qmax = (2 ** (bits-1)) - 1 # 127
-        self.kernel_scale = QScale(jnp.asarray(1.0))
-        self.kernel_zero = QScale(jnp.asarray(0.0))
-        if self.use_bias:
-            self.over_b = OverParam(self.b_mu)
-            self.b_scale = QScale(jnp.asarray(1.0))
-            self.b_zero = QScale(jnp.asarray(0.0))
-    
-    def calibrate(self):
-        """
-        Refresh per-tensor scale/zero from current weights. 
-        Call each step.
-        """
-        kernel = self.over_kernel[...]
-        kernel_min, kernel_max = jnp.min(kernel), jnp.max(kernel)
-        kernel_scale = jnp.maximum((kernel_max - kernel_min) / (self.qmax - self.qmin), 1e-8)
-        self.kernel_scale[...] = kernel_scale
-        self.kernel_zero[...] = jnp.round(self.qmin - kernel_min / kernel_scale)
-
-        if self.use_bias:
-            b = self.over_b[...] # type: ignore
-            b_min, b_max = jnp.min(b), jnp.max(b)
-            b_scale = jnp.maximum((b_max - b_min) / (self.qmax - self.qmin), 1e-8)
-            self.b_scale[...] = b_scale 
-            self.b_zero[...] = jnp.round(self.qmin - b_min / b_scale)
-
-
-    def __call__(self, x: jax.Array) -> jax.Array:
-        kernel = self.over_kernel[...]
-        kernel = fake_quant(kernel, self.kernel_scale, self.kernel_zero, self.qmin, self.qmax)
-
-        out = jax.lax.conv_general_dilated(
-            lhs=x, # [B, H, W, Cin]
-            rhs=kernel, # [kH, kW, Cin, Cout]
-            window_strides=self.strides,
-            padding=self.padding,
-            lhs_dilation=self.input_dilation,
-            rhs_dilation=self.kernel_dilation,
-            feature_group_count=self.feature_group_count,
-            dimension_numbers=('NHWC', 'HWIO', 'NHWC'),
+    def calculate_sampling_nll(self) -> jax.Array:
+        nll = weight_coding_nll(
+            self.w_mu_base, self.w_lnvar_base, self.over_w[...],
+            self.w_scale[...], self.w_zero[...], self.qmin, self.qmax,
         )
+        if self.use_bias:
+            nll += weight_coding_nll(
+                self.b_mu_base, self.b_lnvar_base, self.over_b[...],
+                self.b_scale[...], self.b_zero[...], self.qmin, self.qmax,
+            )
+        return nll
+
+    def __call__(self, x):
+        w = fake_quant(self.over_w[...], self.w_scale[...], self.w_zero[...],
+                       self.qmin, self.qmax)
+        out = x @ w
+        if self.use_bias:
+            b = fake_quant(self.over_b[...], self.b_scale[...], self.b_zero[...],
+                           self.qmin, self.qmax)
+            out = out + b
+        return out
+
+
+class OverConv(nnx.Module):
+    def __init__(self, base, bits: int = 8):
+        self.use_bias = base.use_bias
+        self.qmin = -(2 ** (bits - 1))
+        self.qmax = (2 ** (bits - 1)) - 1
+
+        self.strides = base.strides
+        self.padding = base.padding
+        self.input_dilation = base.input_dilation
+        self.kernel_dilation = base.kernel_dilation
+        self.feature_group_count = base.feature_group_count
+
+        self.over_kernel = OverParam(base.kernel_mu[...])
+        self.kernel_mu_base = base.kernel_mu[...]
+        self.kernel_lnvar_base = base.kernel_lnvar[...]
+        self.kernel_scale = QScale(jnp.asarray(1.0))
+        self.kernel_zero = QZeroPoint(jnp.asarray(0.0))
 
         if self.use_bias:
-            b = self.over_b[...] # type: ignore
-            b = fake_quant(b, self.b_scale, self.b_zero, self.qmin, self.qmax)
-            out = out + b.reshape(1, 1, 1, -1) # bias has shape [Cout, ]
+            self.over_b = OverParam(base.b_mu[...])
+            self.b_mu_base = base.b_mu[...]
+            self.b_lnvar_base = base.b_lnvar[...]
+            self.b_scale = QScale(jnp.asarray(1.0))
+            self.b_zero = QZeroPoint(jnp.asarray(0.0))
 
-        return out 
-    
+    def calibrate(self):
+        s, z = _calibrate_tensor(self.over_kernel[...], self.qmin, self.qmax)
+        self.kernel_scale[...], self.kernel_zero[...] = s, z
+        if self.use_bias:
+            s, z = _calibrate_tensor(self.over_b[...], self.qmin, self.qmax)
+            self.b_scale[...], self.b_zero[...] = s, z
 
+    def calculate_sampling_nll(self) -> jax.Array:
+        nll = weight_coding_nll(
+            self.kernel_mu_base, self.kernel_lnvar_base, self.over_kernel[...],
+            self.kernel_scale[...], self.kernel_zero[...], self.qmin, self.qmax,
+        )
+        if self.use_bias:
+            nll += weight_coding_nll(
+                self.b_mu_base, self.b_lnvar_base, self.over_b[...],
+                self.b_scale[...], self.b_zero[...], self.qmin, self.qmax,
+            )
+        return nll
 
-
-    
-
-        
-
-
-        
+    def __call__(self, x):
+        kernel = fake_quant(self.over_kernel[...], self.kernel_scale[...],
+                            self.kernel_zero[...], self.qmin, self.qmax)
+        out = jax.lax.conv_general_dilated(
+            lhs=x, rhs=kernel,
+            window_strides=self.strides, padding=self.padding,
+            lhs_dilation=self.input_dilation, rhs_dilation=self.kernel_dilation,
+            feature_group_count=self.feature_group_count,
+            dimension_numbers=("NHWC", "HWIO", "NHWC"),
+        )
+        if self.use_bias:
+            b = fake_quant(self.over_b[...], self.b_scale[...], self.b_zero[...],
+                           self.qmin, self.qmax)
+            out = out + b.reshape(1, 1, 1, -1)
+        return out

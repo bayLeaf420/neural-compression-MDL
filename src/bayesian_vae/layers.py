@@ -56,13 +56,14 @@ class BayesianLinear(nnx.Module):
 
         super().__init__()
 
+        
+
+        # rngs.params() returns a fresh deterministic key each time its called.
+        # We in
         self.in_dims = in_dims
         self.out_dims = out_dims
         self.prior_lnvar = jnp.array(prior_lnvar)
-        self.use_bias = use_bias
-
-        # rngs.params() returns a fresh deterministic key each time its called.
-        # We initialise mean with a normal distribution(0, 0.05)
+        self.use_bias = use_bias # initialise mean with a normal distribution(0, 0.05)
         self.w_mu = nnx.Param(
             jax.random.normal(rngs.params(), (in_dims, out_dims)) * 0.05
         )

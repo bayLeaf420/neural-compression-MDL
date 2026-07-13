@@ -23,7 +23,7 @@ from bayesian_vae.data_mnist import (
 
 
 CHECKPOINT_DIR = os.path.abspath(os.environ.get("CHECKPOINT_DIR", "./checkpoints"))
-NUM_EPOCHS = 120
+NUM_EPOCHS = 200
 BATCH_SIZE = 128
 VALIDATE_EVERY = 5
 MASTER_KEY = 99
