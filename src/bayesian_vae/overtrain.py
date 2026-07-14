@@ -54,6 +54,19 @@ def over_grad_step(over, optimizer, x):
 def overfit_one_batch(base, x_batch):
     over = OverVAE(base, bits=BITS)
     optimizer = nnx.Optimizer(over, optax.adam(OVER_LR), wrt=OverParam)
+    # --- one-time NaN diagnosis ---
+    over.calibrate_all()
+    for name, layer in zip(
+        ["enc_c1","enc_c2","enc_lm","enc_ll","dec_l1","dec_c1","dec_cm","dec_cl"],
+        over._layers()):
+        nll = layer.calculate_sampling_nll()
+        print(name, "sampling_nll:", float(nll),
+              "scale:", float(getattr(layer, 'w_scale', getattr(layer,'kernel_scale'))[...]))
+    # also check the forward pass separately
+    xhm, xhl, zm, zl = over(x_batch)
+    print("recon finite:", bool(jnp.all(jnp.isfinite(xhm))),
+          "xhat_lnvar range:", float(jnp.min(xhl)), float(jnp.max(xhl)))
+    # ---
     loss, aux = jnp.asarray(0.0), None
     for _ in range(INNER_STEPS):
         over.calibrate_all()                  # refresh quant grid OUTSIDE the grad step
