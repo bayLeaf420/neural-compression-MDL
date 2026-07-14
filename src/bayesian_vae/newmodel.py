@@ -89,8 +89,8 @@ class BayesVAE(nnx.Module):
                     + jnp.exp(z_lnvar - self.z_prior_lnvar)
                     + jnp.exp(-self.z_prior_lnvar) * z_mu ** 2) - 0.5
         kl = jnp.maximum(kl, self.z_free_nats)
-        # Still [B, z_dim], sum over dims axis and avg over batch axis
-        return jnp.mean(jnp.sum(kl, axis=1), axis=0)
+        # Just sum over everything - clean, handle batch size and stuff in train script
+        return jnp.sum(kl, axis=1) 
     
 
     def calc_param_kl(self):
