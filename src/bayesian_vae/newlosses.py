@@ -61,8 +61,7 @@ def erf_reconstruction_loss(
 
 
 def _log1mexp(x):
-    """Stable log(1 - exp(x)) for x <= 0 (Mächler's two-branch form)."""
-    # near 0: log(-expm1(x));  more negative: log1p(-exp(x))
+    x = jnp.minimum(x, -1e-7)          # keep strictly negative: log1mexp(0) = -inf otherwise
     return jnp.where(
         x > -jnp.log(2.0),
         jnp.log(-jnp.expm1(x)),
