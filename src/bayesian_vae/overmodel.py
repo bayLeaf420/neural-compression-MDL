@@ -38,16 +38,12 @@ class OverVAE(nnx.Module):
         self.over_dec_conv2_mu = OverConv(base.dec_conv2_mu, bits=bits)
         self.over_dec_conv2_lnvar = OverConv(base.dec_conv2_lnvar, bits=bits)
 
-        # convenient list for the aggregate walks
-        self._over_layers = (
-            self.over_enc_conv1,
-            self.over_enc_conv2,
-            self.over_enc_lin_mu,
-            self.over_enc_lin_lnvar,
-            self.over_dec_lin1,
-            self.over_dec_conv1,
-            self.over_dec_conv2_mu,
-            self.over_dec_conv2_lnvar,
+    def _layers(self):
+        return (
+            self.over_enc_conv1, self.over_enc_conv2,
+            self.over_enc_lin_mu, self.over_enc_lin_lnvar,
+            self.over_dec_lin1, self.over_dec_conv1,
+            self.over_dec_conv2_mu, self.over_dec_conv2_lnvar,
         )
 
     def encode(self, x):
@@ -75,14 +71,14 @@ class OverVAE(nnx.Module):
     def calibrate_all(self):
         """Refresh every sublayer's quant grid from current weights.
         Call OUTSIDE the gradient step, before each forward."""
-        for layer in self._over_layers:
+        for layer in self._layers():
             layer.calibrate()
 
     def calculate_sampling_nll(self):
         """Total bits to code all quantized overfit weights under the frozen
         base distributions — the MDL / weight-rate term of the objective."""
         total = jnp.asarray(0.0)
-        for layer in self._over_layers:
+        for layer in self._layers():
             total += layer.calculate_sampling_nll()
         return total
 
