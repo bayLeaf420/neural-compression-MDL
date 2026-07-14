@@ -5,7 +5,9 @@ import flax.nnx as nnx
 import pytest
 
 # Adjust this import to match how your project resolves the module.
-from bayesian_vae.layers import BayesianLinear, BayesianConv2D, _gaussian_kl_divergence
+from bayesian_vae.layers import _gaussian_kl_divergence
+from bayesian_vae.newlayers import NewLin as BayesianLinear
+from bayesian_vae.newlayers import NewConv as BayesianConv2D
 
 
 # ---------------------------------------------------------------------------
@@ -87,15 +89,12 @@ def test_kl_argument_order_matters():
 # BayesianLinear
 # ---------------------------------------------------------------------------
 
-def _make_keys(key, batch_size):
-    return jax.random.split(key, batch_size)
-
 
 def test_linear_output_shape():
     layer = BayesianLinear(8, 4, rngs=nnx.Rngs(jax.random.key(1)))
     B = 5
     x = jnp.ones((B, 8))
-    keys = _make_keys(jax.random.key(2), B)
+    keys = jax.random.key(3)
     out = layer(x, keys)
     assert out.shape == (B, 4), f"expected ({B}, 4), got {out.shape}"
 
@@ -107,7 +106,7 @@ def test_linear_no_bias_constructs_and_runs():
     assert layer.b_lnvar is None
     B = 3
     x = jnp.ones((B, 8))
-    keys = _make_keys(jax.random.key(2), B)
+    keys = jax.random.key(2)
     out = layer(x, keys)  # must not raise
     assert out.shape == (B, 4)
 
@@ -130,8 +129,8 @@ def test_linear_output_is_stochastic():
     """Different keys should give different outputs (weights are sampled)."""
     layer = BayesianLinear(8, 4, rngs=nnx.Rngs(jax.random.key(1)))
     x = jnp.ones((1, 8))
-    out1 = layer(x, _make_keys(jax.random.key(2), 1))
-    out2 = layer(x, _make_keys(jax.random.key(99), 1))
+    out1 = layer(x, jax.random.key(2))
+    out2 = layer(x, jax.random.key(99))
     assert not jnp.allclose(out1, out2), "outputs should differ across keys"
 
 
@@ -144,8 +143,8 @@ def test_conv_output_shape_same_padding_stride1():
     layer = BayesianConv2D(1, 5, (3, 3), (1, 1), rngs=nnx.Rngs(jax.random.key(1)))
     B = 2
     x = jnp.ones((B, 28, 28, 1))
-    keys = _make_keys(jax.random.key(2), B)
-    out = layer(x, keys)
+    key = jax.random.key(3)
+    out = layer(x, key)
     assert out.shape == (B, 28, 28, 5), f"got {out.shape}"
 
 
@@ -154,7 +153,7 @@ def test_conv_output_shape_stride2():
     layer = BayesianConv2D(1, 3, (3, 3), (2, 2), rngs=nnx.Rngs(jax.random.key(1)))
     B = 2
     x = jnp.ones((B, 28, 28, 1))
-    keys = _make_keys(jax.random.key(2), B)
+    keys = jax.random.key(2)
     out = layer(x, keys)
     # ceil(28/2) = 14
     assert out.shape == (B, 14, 14, 3), f"got {out.shape}"
@@ -165,7 +164,7 @@ def test_conv_no_bias_constructs_and_runs():
     assert layer.b_mu is None
     B = 2
     x = jnp.ones((B, 16, 16, 1))
-    keys = _make_keys(jax.random.key(2), B)
+    keys = jax.random.key(2)
     out = layer(x, keys)  # must not raise
     assert out.shape[0] == B and out.shape[-1] == 4
 
@@ -191,7 +190,7 @@ def test_conv_eval_shape_matches_real_call():
     layer = BayesianConv2D(1, 5, (3, 3), (2, 2), rngs=nnx.Rngs(jax.random.key(1)))
     B = 1
     x = jnp.ones((B, 45, 45, 1))
-    keys = _make_keys(jax.random.key(2), B)
+    keys = jax.random.key(2)
     predicted = jax.eval_shape(layer, x, keys)
     actual = layer(x, keys)
     assert predicted.shape == actual.shape, \
@@ -202,13 +201,5 @@ def test_conv_eval_shape_matches_real_call():
 # Manual runner (so you can `python tests/test_layers.py` without pytest)
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
-    fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
-    passed = 0
-    for fn in fns:
-        try:
-            fn()
-            print(f"PASS  {fn.__name__}")
-            passed += 1
-        except Exception as e:
-            print(f"FAIL  {fn.__name__}: {type(e).__name__}: {e}")
-    print(f"\n{passed}/{len(fns)} passed")
+    # test_conv_output_shape_same_padding_stride1()
+    test_conv_no_bias_constructs_and_runs()

@@ -3,7 +3,8 @@ import jax.numpy as jnp
 import flax.nnx as nnx
 
 
-from bayesian_vae.layers import BayesianLinear, BayesianConv2D
+from bayesian_vae.newlayers import NewLin as BayesianLinear
+from bayesian_vae.newlayers import NewConv as BayesianConv2D
 
 
 class BayesVAE(nnx.Module):
